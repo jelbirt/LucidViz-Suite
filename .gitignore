@@ -1,0 +1,26 @@
+# Rust build artifacts
+/target/
+
+# Generated demo and export outputs
+/demo_output/*
+!/demo_output/README.md
+
+# Benchmark and profiling output
+bench_output.txt
+/criterion/
+*.profraw
+*.profdata
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+
+# Editor and OS junk
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~

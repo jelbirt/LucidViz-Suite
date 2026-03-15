@@ -1,0 +1,84 @@
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use lv_data::{EdgeRow, EtvDataset, EtvRow, EtvSheet, LisConfig, ShapeKind};
+use lv_renderer::lis::{build_lis_buffer, compute_frame};
+use rand::rngs::SmallRng;
+use rand::{Rng, SeedableRng};
+
+// ── helpers ────────────────────────────────────────────────────────────────────
+
+fn fake_dataset(n_objects: usize, n_sheets: usize) -> EtvDataset {
+    let mut rng = SmallRng::seed_from_u64(3);
+    let sheets: Vec<EtvSheet> = (0..n_sheets)
+        .map(|si| {
+            let rows: Vec<EtvRow> = (0..n_objects)
+                .map(|i| EtvRow {
+                    label: format!("obj_{i}"),
+                    x: rng.gen_range(-1.0..1.0),
+                    y: rng.gen_range(-1.0..1.0),
+                    z: rng.gen_range(-1.0..1.0),
+                    size: rng.gen_range(0.1..1.0),
+                    size_alpha: 1.0,
+                    spin_x: 0.0,
+                    spin_y: 0.0,
+                    spin_z: 0.0,
+                    shape: ShapeKind::Sphere,
+                    color_r: rng.gen_range(0.0..1.0),
+                    color_g: rng.gen_range(0.0..1.0),
+                    color_b: rng.gen_range(0.0..1.0),
+                    note: 0,
+                    instrument: 0,
+                    channel: 0,
+                    velocity: 64,
+                    cluster_value: rng.gen_range(0.0..5.0),
+                    beats: 1,
+                })
+                .collect();
+            EtvSheet {
+                name: format!("Sheet{si}"),
+                sheet_index: si,
+                rows,
+                edges: Vec::new(),
+            }
+        })
+        .collect();
+    EtvDataset {
+        source_path: None,
+        sheets,
+        all_labels: (0..n_objects).map(|i| format!("obj_{i}")).collect(),
+    }
+}
+
+// ── renderer benchmarks ───────────────────────────────────────────────────────
+
+fn bench_lis_buffer_build(c: &mut Criterion) {
+    let ds = fake_dataset(100, 10);
+    let cfg = LisConfig {
+        lis_value: 60,
+        ..LisConfig::default()
+    };
+    c.bench_function("lis_buffer_build_100obj_10sheets_lis60", |b| {
+        b.iter(|| {
+            let _ = build_lis_buffer(black_box(&ds), black_box(&cfg));
+        })
+    });
+}
+
+fn bench_compute_frame_10k(c: &mut Criterion) {
+    let ds = fake_dataset(100, 100);
+    let cfg = LisConfig {
+        lis_value: 60,
+        ..LisConfig::default()
+    };
+    c.bench_function("compute_frame_100obj_100sheets", |b| {
+        b.iter(|| {
+            let _ = compute_frame(black_box(&ds), black_box(&cfg), 0);
+        })
+    });
+}
+
+criterion_group!(
+    renderer_benches,
+    bench_lis_buffer_build,
+    bench_compute_frame_10k
+);
+criterion_main!(renderer_benches);

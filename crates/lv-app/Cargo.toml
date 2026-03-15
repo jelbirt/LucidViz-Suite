@@ -1,0 +1,67 @@
+[package]
+name        = "lv-app"
+description = "Lucid Visualization Suite — main application binary"
+version.workspace    = true
+edition.workspace    = true
+authors.workspace    = true
+license.workspace    = true
+publish.workspace    = true
+build                = "build.rs"
+
+[[bin]]
+name = "lucid-viz"
+path = "src/main.rs"
+
+[features]
+# "audio" includes the lv-audio crate but NOT midir (no ALSA dependency).
+# Add "midi" to also enable real MIDI I/O (requires libasound2-dev on Linux).
+default    = ["audio", "export", "native-io"]
+audio      = ["dep:lv-audio"]
+midi       = ["audio", "lv-audio/midi"]
+export     = ["dep:lv-export"]
+native-io  = []
+wasm       = []
+
+[dependencies]
+lv-renderer  = { path = "../lv-renderer" }
+lv-gui       = { path = "../lv-gui" }
+lv-data      = { path = "../lv-data" }
+as-pipeline  = { path = "../as-pipeline" }
+mf-pipeline  = { path = "../mf-pipeline" }
+lv-audio     = { path = "../lv-audio",   optional = true }
+lv-export    = { path = "../lv-export",  optional = true }
+
+wgpu.workspace       = true
+winit.workspace      = true
+egui.workspace       = true
+egui-wgpu.workspace  = true
+egui-winit.workspace = true
+anyhow.workspace     = true
+log.workspace        = true
+env_logger.workspace = true
+serde.workspace      = true
+serde_json.workspace = true
+num_cpus.workspace   = true
+pollster.workspace   = true
+rand.workspace       = true
+bytemuck.workspace   = true
+nalgebra.workspace   = true
+dirs-next.workspace  = true
+
+[dev-dependencies]
+tempfile.workspace   = true
+
+# `winres` is only needed when cross-compiling for / building on Windows.
+# It is a no-op on Linux/macOS because `build.rs` gates it behind `#[cfg(target_os = "windows")]`.
+[target.'cfg(windows)'.build-dependencies]
+winres = "0.1"
+
+[package.metadata.bundle]
+name                       = "Lucid Visualization Suite"
+identifier                 = "com.lucidviz.app"
+icon                       = ["assets/icons/lucid-viz.png"]
+short_description          = "GPU-accelerated social-scientific network visualization"
+long_description           = "Lucid Visualization Suite is a high-performance desktop application for 3-D animated network visualization, powered by wgpu and egui."
+osx_minimum_system_version = "10.15"
+category                   = "Science"
+copyright                  = "2024 Lucid Visualization Project"

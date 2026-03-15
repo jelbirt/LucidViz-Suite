@@ -1,0 +1,151 @@
+//! `edge_renderer` — GPU line/edge renderer for the Ego Cluster system.
+//!
+//! Each logical edge is expanded to a camera-facing quad (4 vertices, 6 indices)
+//! on the CPU before upload, matching the `edge.wgsl` vertex shader contract.
+
+use bytemuck::{Pod, Zeroable};
+use wgpu::util::DeviceExt;
+
+// ── GpuEdge ───────────────────────────────────────────────────────────────────
+
+/// One logical edge between two 3-D world-space positions.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+pub struct GpuEdge {
+    pub from_pos: [f32; 3],
+    pub to_pos: [f32; 3],
+    pub color: [f32; 4],
+}
+
+// ── Vertex layout matching edge.wgsl ─────────────────────────────────────────
+//
+// edge.wgsl expects per-vertex (NOT instanced) attributes:
+//   loc 0: from_pos  vec3<f32>   offset  0
+//   loc 1: to_pos    vec3<f32>   offset 12
+//   loc 2: color     vec4<f32>   offset 24
+//   loc 3: side      f32         offset 40
+// Total: 44 bytes per vertex
+//
+// Quad layout: 4 vertices per edge, 6 indices (2 triangles)
+//   side values: +2.0, +1.0, -1.0, -2.0
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct EdgeVertex {
+    from_pos: [f32; 3],
+    to_pos: [f32; 3],
+    color: [f32; 4],
+    side: f32,
+}
+
+static EDGE_VERTEX_ATTRS: &[wgpu::VertexAttribute] = &[
+    wgpu::VertexAttribute {
+        format: wgpu::VertexFormat::Float32x3,
+        offset: 0,
+        shader_location: 0,
+    },
+    wgpu::VertexAttribute {
+        format: wgpu::VertexFormat::Float32x3,
+        offset: 12,
+        shader_location: 1,
+    },
+    wgpu::VertexAttribute {
+        format: wgpu::VertexFormat::Float32x4,
+        offset: 24,
+        shader_location: 2,
+    },
+    wgpu::VertexAttribute {
+        format: wgpu::VertexFormat::Float32,
+        offset: 40,
+        shader_location: 3,
+    },
+];
+
+pub const EDGE_VERTEX_LAYOUT: wgpu::VertexBufferLayout<'static> = wgpu::VertexBufferLayout {
+    array_stride: 44,
+    step_mode: wgpu::VertexStepMode::Vertex,
+    attributes: EDGE_VERTEX_ATTRS,
+};
+
+// ── EdgeRenderer ──────────────────────────────────────────────────────────────
+
+/// Maintains GPU buffers for all visible edges and draws them.
+pub struct EdgeRenderer {
+    vertex_buf: Option<wgpu::Buffer>,
+    index_buf: Option<wgpu::Buffer>,
+    count: u32, // number of indices
+}
+
+impl EdgeRenderer {
+    pub fn new() -> Self {
+        Self {
+            vertex_buf: None,
+            index_buf: None,
+            count: 0,
+        }
+    }
+
+    /// Re-upload edge data to the GPU.
+    pub fn update(&mut self, edges: &[GpuEdge], device: &wgpu::Device) {
+        if edges.is_empty() {
+            self.vertex_buf = None;
+            self.index_buf = None;
+            self.count = 0;
+            return;
+        }
+
+        // Expand each GpuEdge into 4 vertices
+        let side_values = [2.0_f32, 1.0, -1.0, -2.0];
+        let mut verts: Vec<EdgeVertex> = Vec::with_capacity(edges.len() * 4);
+        let mut indices: Vec<u32> = Vec::with_capacity(edges.len() * 6);
+
+        for (ei, edge) in edges.iter().enumerate() {
+            let base = (ei * 4) as u32;
+            for &side in &side_values {
+                verts.push(EdgeVertex {
+                    from_pos: edge.from_pos,
+                    to_pos: edge.to_pos,
+                    color: edge.color,
+                    side,
+                });
+            }
+            // two triangles: (0,1,2) and (0,2,3)
+            indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+        }
+
+        self.count = indices.len() as u32;
+
+        self.vertex_buf = Some(
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("edge_vertices"),
+                contents: bytemuck::cast_slice(&verts),
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            }),
+        );
+        self.index_buf = Some(
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("edge_indices"),
+                contents: bytemuck::cast_slice(&indices),
+                usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+            }),
+        );
+    }
+
+    /// Draw all edges. Caller must have already set the edge pipeline + bind group.
+    pub fn draw<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
+        if self.count == 0 {
+            return;
+        }
+        let Some(vb) = &self.vertex_buf else { return };
+        let Some(ib) = &self.index_buf else { return };
+        pass.set_vertex_buffer(0, vb.slice(..));
+        pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
+        pass.draw_indexed(0..self.count, 0, 0..1);
+    }
+}
+
+impl Default for EdgeRenderer {
+    fn default() -> Self {
+        Self::new()
+    }
+}

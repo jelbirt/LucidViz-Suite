@@ -1,0 +1,27 @@
+[package]
+name        = "lv-data"
+description = "Lucid Visualization Suite — shared data model and XLSX I/O"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+default    = ["native-io"]
+native-io  = []   # enables XLSX/JSON file I/O; disable for wasm32 builds
+wasm       = []   # enables wasm32-unknown-unknown compilation
+
+[dependencies]
+calamine.workspace        = true
+rust_xlsxwriter.workspace = true
+serde.workspace           = true
+serde_json.workspace      = true
+anyhow.workspace          = true
+thiserror.workspace       = true
+log.workspace             = true
+bytemuck.workspace        = true
+
+[[test]]
+name = "round_trip_xlsx"
+path = "../../tests/integration/round_trip_xlsx.rs"

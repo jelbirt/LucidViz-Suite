@@ -1,0 +1,139 @@
+//! `ffmpeg_pipe` — export a frame sequence as video by piping RGBA to ffmpeg.
+//!
+//! Only available when the `video-export` feature is enabled.
+
+#![cfg(feature = "video-export")]
+
+use std::io::Write;
+use std::path::PathBuf;
+use std::process::{Command, Stdio};
+use std::sync::mpsc;
+
+use anyhow::{bail, Context as _, Result};
+use lv_data::LisBuffer;
+use lv_renderer::{ArcballCamera, WgpuContext};
+
+use crate::snapshot::capture_frame;
+
+// ── types ─────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct VideoConfig {
+    pub output_path: PathBuf,
+    pub fps: u32,
+    pub crf: u32,
+    pub codec: String,
+}
+
+impl Default for VideoConfig {
+    fn default() -> Self {
+        Self {
+            output_path: PathBuf::from("output.mp4"),
+            fps: 30,
+            crf: 23,
+            codec: "libx264".to_string(),
+        }
+    }
+}
+
+// ── public API ────────────────────────────────────────────────────────────────
+
+/// Export frames `start_frame ..= end_frame` as a video file via ffmpeg.
+///
+/// Requires `ffmpeg` to be on `PATH`.  RGBA frames are streamed to ffmpeg's
+/// stdin; no intermediate files are written.
+#[allow(clippy::too_many_arguments)]
+pub fn export_video(
+    ctx: &WgpuContext,
+    buffer: &LisBuffer,
+    camera: &ArcballCamera,
+    width: u32,
+    height: u32,
+    start_frame: u32,
+    end_frame: u32,
+    vid_config: &VideoConfig,
+    progress: &mpsc::Sender<f32>,
+) -> Result<()> {
+    // Verify ffmpeg is available
+    Command::new("ffmpeg")
+        .arg("-version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .context("ffmpeg not found on PATH — please install ffmpeg")?;
+
+    let out = vid_config
+        .output_path
+        .to_str()
+        .context("output_path is not valid UTF-8")?;
+
+    // Spawn ffmpeg: read rawvideo RGBA from stdin
+    let mut ffmpeg = Command::new("ffmpeg")
+        .args([
+            "-y", // overwrite output
+            "-f",
+            "rawvideo",
+            "-pixel_format",
+            "rgba",
+            "-video_size",
+            &format!("{width}x{height}"),
+            "-framerate",
+            &vid_config.fps.to_string(),
+            "-i",
+            "pipe:0", // read from stdin
+            "-c:v",
+            &vid_config.codec,
+            "-crf",
+            &vid_config.crf.to_string(),
+            "-pix_fmt",
+            "yuv420p",
+            out,
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("spawn ffmpeg")?;
+
+    let stdin = ffmpeg.stdin.as_mut().context("ffmpeg stdin")?;
+    let end = end_frame.min(buffer.frames.len().saturating_sub(1) as u32);
+    let total = (end + 1).saturating_sub(start_frame).max(1) as f32;
+
+    for frame_idx in start_frame..=end {
+        let frame = buffer
+            .frames
+            .get(frame_idx as usize)
+            .with_context(|| format!("frame {frame_idx} out of range"))?;
+
+        let img = capture_frame(ctx, frame, camera, width, height)
+            .with_context(|| format!("capture_frame {frame_idx}"))?;
+
+        // Write raw RGBA bytes directly to ffmpeg stdin
+        stdin
+            .write_all(img.as_raw())
+            .context("write to ffmpeg stdin")?;
+
+        let pct = (frame_idx + 1 - start_frame) as f32 / total;
+        let _ = progress.send(pct);
+    }
+
+    // Close stdin to signal EOF
+    drop(ffmpeg.stdin.take());
+
+    let status = ffmpeg.wait().context("ffmpeg wait")?;
+    if !status.success() {
+        let stderr = ffmpeg
+            .stderr
+            .as_mut()
+            .map(|s| {
+                use std::io::Read;
+                let mut buf = String::new();
+                let _ = s.read_to_string(&mut buf);
+                buf
+            })
+            .unwrap_or_default();
+        bail!("ffmpeg exited with {status}: {stderr}");
+    }
+
+    Ok(())
+}

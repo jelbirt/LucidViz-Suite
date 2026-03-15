@@ -1,0 +1,43 @@
+[package]
+name        = "mf-pipeline"
+description = "MatrixForge — text ingestion, co-occurrence, PPMI, centrality, output"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+default   = []
+native-io = []   # gate file I/O
+wasm      = []   # wasm32-unknown-unknown compatibility
+
+[dependencies]
+lv-data.path     = "../lv-data"
+as-pipeline.path = "../as-pipeline"
+
+unicode-normalization.workspace = true
+unicode-segmentation.workspace  = true
+stop-words.workspace            = true
+petgraph.workspace              = true
+rayon.workspace                 = true
+serde.workspace                 = true
+serde_json.workspace            = true
+rust_xlsxwriter.workspace       = true
+anyhow.workspace                = true
+thiserror.workspace             = true
+num_cpus.workspace        = true
+
+[dev-dependencies]
+tempfile = "3"
+calamine.workspace  = true
+criterion.workspace = true
+rand.workspace      = true
+
+[[test]]
+name = "mf_pipeline_e2e"
+path = "../../tests/integration/mf_pipeline_e2e.rs"
+
+[[bench]]
+name    = "mf_bench"
+harness = false

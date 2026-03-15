@@ -1,0 +1,40 @@
+[package]
+name        = "as-pipeline"
+description = "AlignSpace — SE matrix ingestion, MDS, Procrustes, centrality"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+default   = []
+native-io = []   # I/O helpers (gate file reading behind this)
+wasm      = []   # wasm32-unknown-unknown compatibility
+
+[dependencies]
+lv-data.path = "../lv-data"
+
+nalgebra.workspace        = true
+faer.workspace            = true
+ndarray.workspace         = true
+rayon.workspace           = true
+petgraph.workspace        = true
+serde.workspace           = true
+serde_json.workspace      = true
+rust_xlsxwriter.workspace = true
+anyhow.workspace          = true
+thiserror.workspace       = true
+num_cpus.workspace        = true
+
+[dev-dependencies]
+criterion.workspace = true
+rand.workspace      = true
+
+[[bench]]
+name    = "mds_bench"
+harness = false
+
+[[test]]
+name = "as_pipeline_e2e"
+path = "../../tests/integration/as_pipeline_e2e.rs"

@@ -1,0 +1,30 @@
+[package]
+name        = "lv-gui"
+description = "Lucid Visualization Suite — egui immediate-mode GUI panels"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+audio        = ["dep:lv-audio"]
+export       = ["dep:lv-export"]
+video-export = []
+
+[dependencies]
+lv-data.path     = "../lv-data"
+as-pipeline.path = "../as-pipeline"
+mf-pipeline.path = "../mf-pipeline"
+lv-audio         = { path = "../lv-audio", optional = true }
+lv-export        = { path = "../lv-export", optional = true }
+
+egui.workspace       = true
+egui-wgpu.workspace  = true
+egui-winit.workspace = true
+anyhow.workspace     = true
+log.workspace        = true
+serde.workspace      = true
+serde_json.workspace = true
+rfd.workspace        = true
+ndarray.workspace    = true

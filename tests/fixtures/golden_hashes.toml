@@ -1,0 +1,15 @@
+# golden_hashes.toml
+# SHA-256 hashes of golden PNG snapshots for visual regression testing.
+# Populated in Phase 4 once the headless renderer is implemented.
+#
+# Format:
+# [test_name]
+# hash = "<64-char hex SHA-256 of rendered PNG>"
+# resolution = [width, height]
+# description = "human-readable description"
+
+# Example (to be replaced with real values in Phase 4):
+# [sphere_single_white_bg]
+# hash = ""
+# resolution = [800, 600]
+# description = "Single white sphere, default camera, white background"
