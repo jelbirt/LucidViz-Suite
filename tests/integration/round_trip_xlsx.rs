@@ -221,20 +221,70 @@ mod tests {
         }
     }
 
+    #[test]
+    fn directed_edges_survive_xlsx_and_json_round_trip() {
+        let dataset = EtvDataset {
+            source_path: None,
+            sheets: vec![EtvSheet {
+                name: "T0".into(),
+                sheet_index: 0,
+                rows: vec![
+                    EtvRow {
+                        label: "Alpha".into(),
+                        size: 1.0,
+                        velocity: 64,
+                        ..EtvRow::default()
+                    },
+                    EtvRow {
+                        label: "Beta".into(),
+                        size: 1.0,
+                        velocity: 64,
+                        ..EtvRow::default()
+                    },
+                ],
+                edges: vec![
+                    EdgeRow {
+                        from: "Alpha".into(),
+                        to: "Beta".into(),
+                        strength: 0.8,
+                    },
+                    EdgeRow {
+                        from: "Beta".into(),
+                        to: "Alpha".into(),
+                        strength: 0.3,
+                    },
+                ],
+            }],
+            all_labels: vec!["Alpha".into(), "Beta".into()],
+        };
+
+        let xlsx_bytes = write_etv_xlsx_bytes(&dataset).expect("write xlsx");
+        let xlsx_recovered = read_etv_xlsx_bytes(&xlsx_bytes).expect("read xlsx");
+        assert_eq!(xlsx_recovered.sheets[0].edges, dataset.sheets[0].edges);
+
+        let json_bytes = write_etv_json_bytes(&dataset).expect("write json");
+        let json_recovered = read_etv_json_bytes(&json_bytes).expect("read json");
+        assert_eq!(json_recovered.sheets[0].edges, dataset.sheets[0].edges);
+    }
+
     // ── LIS buffer estimation ─────────────────────────────────────────────────
 
     #[test]
     fn lis_buffer_estimate_two_sheets() {
         let ds = two_sheet_dataset();
-        // (2-1) * 30 = 30 frames, 3 objects, 64 bytes each = 5760
+        // (2-1) * 30 = 30 frames, 3 union labels, 64 bytes each = 5760
         let est = ds.estimated_lis_buffer_bytes(30);
         assert_eq!(est, 30 * 3 * 64);
     }
 
     #[test]
-    fn lis_buffer_estimate_single_sheet_is_zero() {
+    fn lis_buffer_estimate_single_sheet_counts_static_frames() {
         let mut ds = two_sheet_dataset();
         ds.sheets.truncate(1);
-        assert_eq!(ds.estimated_lis_buffer_bytes(30), 0);
+        ds.all_labels = ds.canonical_all_labels();
+        assert_eq!(
+            ds.estimated_lis_buffer_bytes(30),
+            30 * ds.all_labels.len() * 64
+        );
     }
 }

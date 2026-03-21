@@ -220,6 +220,29 @@ pub struct EtvDataset {
 }
 
 impl EtvDataset {
+    /// Canonical deduplicated union of all row labels across all sheets.
+    pub fn canonical_all_labels_from_sheets(sheets: &[EtvSheet]) -> Vec<String> {
+        let mut all_labels = Vec::new();
+        for sheet in sheets {
+            for row in &sheet.rows {
+                if !all_labels.contains(&row.label) {
+                    all_labels.push(row.label.clone());
+                }
+            }
+        }
+        all_labels
+    }
+
+    /// Canonical deduplicated union of all row labels across all sheets.
+    pub fn canonical_all_labels(&self) -> Vec<String> {
+        Self::canonical_all_labels_from_sheets(&self.sheets)
+    }
+
+    /// Rebuild `all_labels` from sheet rows in first-seen order.
+    pub fn canonicalize_all_labels(&mut self) {
+        self.all_labels = self.canonical_all_labels();
+    }
+
     /// Number of time points (= number of sheets).
     pub fn time_points(&self) -> usize {
         self.sheets.len()
@@ -232,15 +255,20 @@ impl EtvDataset {
 
     /// Estimated size in bytes of a fully pre-computed LIS frame buffer.
     ///
-    /// `frames = (time_points - 1) * lis_value`
-    /// `bytes  = frames * max_objects * size_of::<GpuInstance>()`
+    /// `frames = (time_points - 1) * lis_value` for multi-sheet datasets,
+    /// `frames = lis_value` for single-sheet datasets,
+    /// `bytes  = frames * all_labels.len() * size_of::<GpuInstance>()`
     pub fn estimated_lis_buffer_bytes(&self, lis_value: u32) -> usize {
         let time_points = self.time_points();
-        if time_points < 2 {
+        if time_points == 0 {
             return 0;
         }
-        let frames = (time_points - 1) * lis_value as usize;
-        frames * self.max_objects() * std::mem::size_of::<GpuInstance>()
+        let frames = if time_points > 1 {
+            (time_points - 1) * lis_value as usize
+        } else {
+            lis_value as usize
+        };
+        frames * self.all_labels.len() * std::mem::size_of::<GpuInstance>()
     }
 }
 
@@ -314,9 +342,11 @@ impl GpuInstance {
 pub struct LisFrame {
     /// Interpolated GPU instances for every node active at this frame.
     pub instances: Vec<GpuInstance>,
-    /// Index into `EtvDataset::sheets` of the *source* sheet for this segment.
-    pub slice_index: u32,
+    /// Labels for `instances`, in exactly the same order.
+    pub labels: Vec<String>,
     /// Absolute frame index across the whole animation.
+    pub slice_index: u32,
+    /// Index into `EtvDataset::sheets` of the source sheet for this segment.
     pub transition_index: u32,
     /// Frame index within the current sheet-to-sheet segment [0, lis).
     pub local_slice: u32,
@@ -449,8 +479,53 @@ mod tests {
         let dataset = EtvDataset {
             source_path: None,
             sheets: vec![sheet.clone(), sheet.clone(), sheet],
-            all_labels: vec![],
+            all_labels: (0..10).map(|i| format!("n{i}")).collect(),
         };
         assert_eq!(dataset.estimated_lis_buffer_bytes(30), 60 * 10 * 64);
+    }
+
+    #[test]
+    fn canonical_all_labels_uses_first_seen_row_order() {
+        let dataset = EtvDataset {
+            source_path: None,
+            sheets: vec![
+                EtvSheet {
+                    name: "t0".into(),
+                    sheet_index: 0,
+                    rows: vec![
+                        EtvRow {
+                            label: "beta".into(),
+                            ..Default::default()
+                        },
+                        EtvRow {
+                            label: "alpha".into(),
+                            ..Default::default()
+                        },
+                    ],
+                    edges: vec![],
+                },
+                EtvSheet {
+                    name: "t1".into(),
+                    sheet_index: 1,
+                    rows: vec![
+                        EtvRow {
+                            label: "alpha".into(),
+                            ..Default::default()
+                        },
+                        EtvRow {
+                            label: "gamma".into(),
+                            ..Default::default()
+                        },
+                    ],
+                    edges: vec![],
+                },
+            ],
+            all_labels: vec!["stale".into()],
+        };
+
+        assert_eq!(
+            dataset.canonical_all_labels(),
+            vec!["beta", "alpha", "gamma"]
+        );
     }
 }

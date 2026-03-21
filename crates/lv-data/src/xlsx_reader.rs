@@ -3,7 +3,7 @@ use std::path::Path;
 
 use calamine::{open_workbook_auto, open_workbook_auto_from_rs, Data, DataType, Reader};
 
-use crate::{DataError, EdgeRow, EtvDataset, EtvRow, EtvSheet, ShapeKind};
+use crate::{validate_dataset, DataError, EdgeRow, EtvDataset, EtvRow, EtvSheet, ShapeKind};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Public API
@@ -41,27 +41,22 @@ where
     }
 
     let mut sheets: Vec<EtvSheet> = Vec::new();
-    let mut all_labels: Vec<String> = Vec::new();
-    let mut seen_labels: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for (sheet_index, name) in sheet_names.iter().enumerate() {
         let range = workbook.worksheet_range(name)?;
         let etv_sheet = parse_sheet(range, name, sheet_index)?;
 
-        for row in &etv_sheet.rows {
-            if seen_labels.insert(row.label.clone()) {
-                all_labels.push(row.label.clone());
-            }
-        }
-
         sheets.push(etv_sheet);
     }
 
-    Ok(EtvDataset {
+    let all_labels = EtvDataset::canonical_all_labels_from_sheets(&sheets);
+    let dataset = EtvDataset {
         source_path,
         sheets,
         all_labels,
-    })
+    };
+    validate_dataset(&dataset)?;
+    Ok(dataset)
 }
 
 fn parse_sheet(

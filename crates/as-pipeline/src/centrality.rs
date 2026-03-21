@@ -15,7 +15,13 @@ use std::collections::BinaryHeap;
 
 use crate::types::CentralityReport;
 
-/// Compute centrality measures from a symmetric adjacency matrix.
+/// Compute centrality measures from an adjacency matrix using the pipeline's
+/// current undirected centrality contract.
+///
+/// This intentionally treats the graph as undirected for backward
+/// compatibility: only the upper triangle is scanned, so directed asymmetry is
+/// not reflected in the centrality report even though other AS/LV stages may
+/// preserve directed edges.
 ///
 /// Edge weight threshold: an edge exists if `adj[i,j] > 0`.
 /// Dijkstra uses `1 / weight` as edge cost so stronger ties are "shorter".

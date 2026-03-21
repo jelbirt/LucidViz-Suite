@@ -17,6 +17,27 @@ pub fn normalize_coordinates(coords: &mut MdsCoordinates, target_range: f64) {
     }
 }
 
+/// Scale every coordinate set in a series with one shared factor so the global
+/// maximum absolute value equals `target_range`. No-op if the whole series is zero.
+pub fn normalize_coordinate_series(coords: &mut [MdsCoordinates], target_range: f64) {
+    let max_abs = coords
+        .iter()
+        .flat_map(|c| c.data.iter())
+        .map(|v| v.abs())
+        .fold(0.0f64, f64::max);
+
+    if max_abs < 1e-15 {
+        return;
+    }
+
+    let scale = target_range / max_abs;
+    for coord_set in coords.iter_mut() {
+        for value in &mut coord_set.data {
+            *value *= scale;
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -52,5 +73,29 @@ mod tests {
         normalize_coordinates(&mut coords, 10.0);
         let max_abs = coords.data.iter().map(|v| v.abs()).fold(0.0f64, f64::max);
         assert!((max_abs - 10.0).abs() < 1e-10, "max_abs={}", max_abs);
+    }
+
+    #[test]
+    fn test_global_normalize_preserves_relative_scale_between_slices() {
+        let mut coords = vec![
+            make_coords(vec![1.0, 0.0, 0.0, 1.0], 2),
+            make_coords(vec![4.0, 0.0, 0.0, 4.0], 2),
+        ];
+
+        normalize_coordinate_series(&mut coords, 2.0);
+
+        let first_max = coords[0]
+            .data
+            .iter()
+            .map(|v| v.abs())
+            .fold(0.0f64, f64::max);
+        let second_max = coords[1]
+            .data
+            .iter()
+            .map(|v| v.abs())
+            .fold(0.0f64, f64::max);
+
+        assert!((first_max - 0.5).abs() < 1e-10, "first_max={first_max}");
+        assert!((second_max - 2.0).abs() < 1e-10, "second_max={second_max}");
     }
 }

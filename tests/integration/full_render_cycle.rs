@@ -167,14 +167,14 @@ fn lis_buffer_has_correct_frame_count() {
     };
     let buf = build_lis_buffer(&dataset, &config);
 
-    // 1 sheet → no transitions → 1 * lis frames
+    // 1 sheet -> renderer keeps a static animation segment of `lis` frames.
     assert_eq!(buf.total_frames, 10);
     assert_eq!(buf.frames.len(), 10);
     assert!(!buf.streaming);
 }
 
 /// Phase 9 — multi-sheet LIS buffer frame count assertion.
-/// 3 sheets × LIS=30 → total_frames = 3 * 30 = 60.
+/// 3 sheets -> 2 transitions; 2 * LIS=30 = 60 frames.
 #[test]
 fn migration_dataset_lis_buffer_60_frames() {
     let dataset = make_migration_dataset();

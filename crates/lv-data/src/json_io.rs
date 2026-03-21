@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::{DataError, EtvDataset};
+use crate::{validate_dataset, DataError, EtvDataset};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Public API
@@ -16,7 +16,9 @@ pub fn write_etv_json(dataset: &EtvDataset, path: &Path) -> Result<(), DataError
 /// Deserialise an [`EtvDataset`] from a JSON file.
 pub fn read_etv_json(path: &Path) -> Result<EtvDataset, DataError> {
     let bytes = std::fs::read(path)?;
-    let dataset: EtvDataset = serde_json::from_slice(&bytes)?;
+    let mut dataset: EtvDataset = serde_json::from_slice(&bytes)?;
+    dataset.canonicalize_all_labels();
+    validate_dataset(&dataset)?;
     Ok(dataset)
 }
 
@@ -28,7 +30,9 @@ pub fn write_etv_json_bytes(dataset: &EtvDataset) -> Result<Vec<u8>, DataError> 
 
 /// Deserialise an [`EtvDataset`] from an in-memory JSON byte slice.
 pub fn read_etv_json_bytes(bytes: &[u8]) -> Result<EtvDataset, DataError> {
-    let dataset: EtvDataset = serde_json::from_slice(bytes)?;
+    let mut dataset: EtvDataset = serde_json::from_slice(bytes)?;
+    dataset.canonicalize_all_labels();
+    validate_dataset(&dataset)?;
     Ok(dataset)
 }
 
@@ -98,5 +102,46 @@ mod tests {
         // Pretty JSON must contain newlines and indentation
         assert!(s.contains('\n'));
         assert!(s.contains("  "));
+    }
+
+    #[test]
+    fn json_read_canonicalizes_all_labels() {
+        let json = br#"{
+          "source_path": null,
+          "sheets": [
+            {
+              "name": "T0",
+              "sheet_index": 0,
+              "rows": [
+                {
+                  "label": "NodeA",
+                  "x": 0.0,
+                  "y": 0.0,
+                  "z": 0.0,
+                  "size": 1.0,
+                  "size_alpha": 0.0,
+                  "spin_x": 0.0,
+                  "spin_y": 0.0,
+                  "spin_z": 0.0,
+                  "shape": "Sphere",
+                  "color_r": 1.0,
+                  "color_g": 1.0,
+                  "color_b": 1.0,
+                  "note": 60,
+                  "instrument": 0,
+                  "channel": 0,
+                  "velocity": 64,
+                  "cluster_value": 0.0,
+                  "beats": 0
+                }
+              ],
+              "edges": []
+            }
+          ],
+          "all_labels": ["ghost", "NodeA"]
+        }"#;
+
+        let recovered = read_etv_json_bytes(json).expect("read");
+        assert_eq!(recovered.all_labels, vec!["NodeA"]);
     }
 }

@@ -6,6 +6,7 @@ use std::sync::mpsc;
 
 use lv_data::{EtvDataset, LisBuffer, LisConfig, ShapeKind};
 use mf_pipeline::types::{MfOutput, MfSeriesOutput};
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum AsInputSource {
@@ -32,6 +33,15 @@ pub enum PlayState {
     Stopped,
 }
 
+/// Directional interpretation for ego-cluster expansion and edge display.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EgoEdgeDirection {
+    Incoming,
+    Outgoing,
+    #[default]
+    Both,
+}
+
 /// The full mutable application state shared between the GUI and renderer.
 pub struct AppState {
     // ── Dataset ─────────────────────────────────────────────────────────────
@@ -54,6 +64,7 @@ pub struct AppState {
     pub cluster_min: f64,
     pub cluster_max: f64,
     pub ego_mode: bool,
+    pub ego_direction: EgoEdgeDirection,
     pub secondary_edges: bool,
     pub shared_only: bool,
 
@@ -102,6 +113,7 @@ impl AppState {
             cluster_min: f64::NEG_INFINITY,
             cluster_max: f64::INFINITY,
             ego_mode: false,
+            ego_direction: EgoEdgeDirection::Both,
             secondary_edges: false,
             shared_only: false,
             rebuild_lis: false,

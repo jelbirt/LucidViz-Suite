@@ -5,12 +5,14 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use std::thread;
 
+use as_pipeline::output::write_as_results;
 use as_pipeline::pipeline::{mf_output_to_distance_matrix, run_distance_pipeline, run_pipeline};
 use as_pipeline::types::{
-    AsDistancePipelineInput, AsPipelineInput, MdsConfig, MdsDimMode, ProcrustesMode, SmacofConfig,
-    SmacofInit,
+    AsDistancePipelineInput, AsPipelineInput, AsPipelineResult, MdsConfig, MdsDimMode,
+    NormalizationMode, ProcrustesMode, SmacofConfig, SmacofInit,
 };
 use lv_data::schema::EtvDataset;
+use lv_data::validate_dataset;
 use mf_pipeline::pipeline::mf_series_output_to_as_input;
 use ndarray::Array2;
 
@@ -23,6 +25,7 @@ pub struct AsPanel {
     dim_mode: MdsDimModeUi,
     procrustes: ProcrustesMode,
     normalize: bool,
+    normalization_mode: NormalizationMode,
     norm_range: f64,
     // SMACOF sub-config
     smacof_max_iter: u32,
@@ -56,6 +59,7 @@ impl Default for AsPanel {
             dim_mode: MdsDimModeUi::Three,
             procrustes: ProcrustesMode::None,
             normalize: true,
+            normalization_mode: NormalizationMode::Independent,
             norm_range: 300.0,
             smacof_max_iter: 300,
             smacof_tol: 1e-6,
@@ -129,6 +133,11 @@ impl AsPanel {
                 );
                 ui.selectable_value(
                     &mut self.procrustes,
+                    ProcrustesMode::TimeSeriesAnchored,
+                    "Time Series (Anchored)",
+                );
+                ui.selectable_value(
+                    &mut self.procrustes,
                     ProcrustesMode::OptimalChoice,
                     "Optimal Choice",
                 );
@@ -137,6 +146,23 @@ impl AsPanel {
         // ── Normalise ──────────────────────────────────────────────────────
         ui.checkbox(&mut self.normalize, "Normalize coordinates");
         if self.normalize {
+            egui::ComboBox::from_label("Normalization scope")
+                .selected_text(match self.normalization_mode {
+                    NormalizationMode::Independent => "Per slice",
+                    NormalizationMode::Global => "Whole series",
+                })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(
+                        &mut self.normalization_mode,
+                        NormalizationMode::Independent,
+                        "Per slice",
+                    );
+                    ui.selectable_value(
+                        &mut self.normalization_mode,
+                        NormalizationMode::Global,
+                        "Whole series",
+                    );
+                });
             ui.horizontal(|ui| {
                 ui.label("Range:");
                 ui.add(
@@ -283,6 +309,7 @@ impl AsPanel {
         let dim_mode = self.selected_dim_mode();
         let procrustes_mode = self.procrustes;
         let normalize = self.normalize;
+        let normalization_mode = self.normalization_mode;
         let target_range = self.norm_range;
 
         thread::spawn(move || {
@@ -304,6 +331,7 @@ impl AsPanel {
                 procrustes_mode,
                 mds_dims: dim_mode,
                 normalize,
+                normalization_mode,
                 target_range,
                 procrustes_scale: true,
             };
@@ -313,12 +341,8 @@ impl AsPanel {
                         step: "Writing output…".into(),
                         pct: 0.9,
                     });
-                    // Serialize result to JSON in output_dir
-                    let out_file = output_dir.join("as_result.json");
-                    if let Ok(json) = serde_json::to_string(&result.etv_dataset) {
-                        let _ = std::fs::write(&out_file, json);
-                    }
-                    let _ = tx.send(PipelineEvent::Done(Ok(out_file)));
+                    let result = write_gui_output_artifacts(&result, &output_dir);
+                    let _ = tx.send(PipelineEvent::Done(result));
                 }
                 Err(e) => {
                     let _ = tx.send(PipelineEvent::Done(Err(e.to_string())));
@@ -347,6 +371,7 @@ impl AsPanel {
         let dim_mode = self.selected_dim_mode();
         let procrustes_mode = self.procrustes;
         let normalize = self.normalize;
+        let normalization_mode = self.normalization_mode;
         let target_range = self.norm_range;
 
         thread::spawn(move || {
@@ -361,23 +386,14 @@ impl AsPanel {
                 procrustes_mode,
                 dim_mode,
                 normalize,
+                normalization_mode,
                 target_range,
             );
 
             match run_distance_pipeline(&input) {
                 Ok(result) => {
-                    let out_file = output_dir.join("as_result.json");
-                    match serde_json::to_string(&result.etv_dataset)
-                        .map_err(|e| e.to_string())
-                        .and_then(|json| std::fs::write(&out_file, json).map_err(|e| e.to_string()))
-                    {
-                        Ok(()) => {
-                            let _ = tx.send(PipelineEvent::Done(Ok(out_file)));
-                        }
-                        Err(e) => {
-                            let _ = tx.send(PipelineEvent::Done(Err(e)));
-                        }
-                    }
+                    let result = write_gui_output_artifacts(&result, &output_dir);
+                    let _ = tx.send(PipelineEvent::Done(result));
                 }
                 Err(e) => {
                     let _ = tx.send(PipelineEvent::Done(Err(e.to_string())));
@@ -406,6 +422,7 @@ impl AsPanel {
         let dim_mode = self.selected_dim_mode();
         let procrustes_mode = self.procrustes;
         let normalize = self.normalize;
+        let normalization_mode = self.normalization_mode;
         let target_range = self.norm_range;
 
         thread::spawn(move || {
@@ -420,24 +437,15 @@ impl AsPanel {
                 procrustes_mode,
                 dim_mode,
                 normalize,
+                normalization_mode,
                 target_range,
                 true,
             );
 
             match run_distance_pipeline(&input) {
                 Ok(result) => {
-                    let out_file = output_dir.join("as_result.json");
-                    match serde_json::to_string(&result.etv_dataset)
-                        .map_err(|e| e.to_string())
-                        .and_then(|json| std::fs::write(&out_file, json).map_err(|e| e.to_string()))
-                    {
-                        Ok(()) => {
-                            let _ = tx.send(PipelineEvent::Done(Ok(out_file)));
-                        }
-                        Err(e) => {
-                            let _ = tx.send(PipelineEvent::Done(Err(e)));
-                        }
-                    }
+                    let result = write_gui_output_artifacts(&result, &output_dir);
+                    let _ = tx.send(PipelineEvent::Done(result));
                 }
                 Err(e) => {
                     let _ = tx.send(PipelineEvent::Done(Err(e.to_string())));
@@ -460,6 +468,7 @@ fn build_mf_distance_input(
     procrustes_mode: ProcrustesMode,
     mds_dims: MdsDimMode,
     normalize: bool,
+    normalization_mode: NormalizationMode,
     target_range: f64,
 ) -> AsDistancePipelineInput {
     let se = mf_output_to_distance_matrix(
@@ -475,29 +484,14 @@ fn build_mf_distance_input(
         procrustes_mode,
         mds_dims,
         normalize,
+        normalization_mode,
         target_range,
         procrustes_scale: true,
     }
 }
 
 fn collect_dataset_labels(ds: &EtvDataset) -> Vec<String> {
-    let mut labels = Vec::new();
-
-    for label in &ds.all_labels {
-        if !labels.contains(label) {
-            labels.push(label.clone());
-        }
-    }
-
-    for sheet in &ds.sheets {
-        for row in &sheet.rows {
-            if !labels.contains(&row.label) {
-                labels.push(row.label.clone());
-            }
-        }
-    }
-
-    labels
+    ds.canonical_all_labels()
 }
 
 fn build_dataset_adjacencies(
@@ -523,7 +517,6 @@ fn build_dataset_adjacencies(
                 match (i, j) {
                     (Some(i), Some(j)) => {
                         mat[[i, j]] = edge.strength;
-                        mat[[j, i]] = edge.strength;
                     }
                     _ => {
                         dropped_edges
@@ -538,18 +531,43 @@ fn build_dataset_adjacencies(
     (datasets, dropped_edges.into_iter().collect())
 }
 
+fn write_gui_output_artifacts(
+    result: &AsPipelineResult,
+    output_dir: &std::path::Path,
+) -> Result<PathBuf, String> {
+    write_as_results(result, output_dir).map_err(|e| e.to_string())?;
+
+    let dataset_path = output_dir.join("etv_dataset.json");
+    let dataset_json =
+        serde_json::to_string_pretty(&result.etv_dataset).map_err(|e| e.to_string())?;
+    std::fs::write(&dataset_path, dataset_json).map_err(|e| e.to_string())?;
+
+    Ok(dataset_path)
+}
+
 fn load_etv_dataset(path: &std::path::Path) -> Result<EtvDataset, String> {
     let json = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    serde_json::from_str(&json).map_err(|e| e.to_string())
+    let mut dataset: EtvDataset = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+    dataset.canonicalize_all_labels();
+    validate_dataset(&dataset).map_err(|e| e.to_string())?;
+    Ok(dataset)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{build_dataset_adjacencies, build_mf_distance_input, collect_dataset_labels};
+    use super::{
+        build_dataset_adjacencies, build_mf_distance_input, collect_dataset_labels,
+        write_gui_output_artifacts,
+    };
     use as_pipeline::types::CentralityReport;
-    use as_pipeline::types::{MdsConfig, MdsDimMode, ProcrustesMode};
+    use as_pipeline::types::{
+        AsPipelineResult, CentralityState, DistanceMatrix, MdsAlgorithm, MdsCoordinates,
+        ProcrustesResult,
+    };
+    use as_pipeline::types::{MdsConfig, MdsDimMode, NormalizationMode, ProcrustesMode};
     use lv_data::schema::{EdgeRow, EtvDataset, EtvRow, EtvSheet};
     use mf_pipeline::types::{MfOutput, SimToDistMethod};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn collect_dataset_labels_uses_union_across_dataset() {
@@ -585,6 +603,25 @@ mod tests {
     }
 
     #[test]
+    fn collect_dataset_labels_discards_stale_all_labels_entries() {
+        let dataset = EtvDataset {
+            source_path: None,
+            sheets: vec![EtvSheet {
+                name: "T1".into(),
+                sheet_index: 0,
+                rows: vec![EtvRow {
+                    label: "alpha".into(),
+                    ..Default::default()
+                }],
+                edges: vec![],
+            }],
+            all_labels: vec!["ghost".into(), "alpha".into()],
+        };
+
+        assert_eq!(collect_dataset_labels(&dataset), vec!["alpha".to_string()]);
+    }
+
+    #[test]
     fn build_dataset_adjacencies_reports_unknown_edge_labels() {
         let dataset = EtvDataset {
             source_path: None,
@@ -608,6 +645,42 @@ mod tests {
 
         assert_eq!(datasets.len(), 1);
         assert_eq!(dropped, vec!["T1:alpha -> missing"]);
+    }
+
+    #[test]
+    fn build_dataset_adjacencies_preserves_edge_direction() {
+        let dataset = EtvDataset {
+            source_path: None,
+            sheets: vec![EtvSheet {
+                name: "T1".into(),
+                sheet_index: 0,
+                rows: vec![
+                    EtvRow {
+                        label: "alpha".into(),
+                        ..Default::default()
+                    },
+                    EtvRow {
+                        label: "beta".into(),
+                        ..Default::default()
+                    },
+                ],
+                edges: vec![EdgeRow {
+                    from: "alpha".into(),
+                    to: "beta".into(),
+                    strength: 0.75,
+                }],
+            }],
+            all_labels: vec!["alpha".into(), "beta".into()],
+        };
+
+        let (datasets, dropped) =
+            build_dataset_adjacencies(&dataset, &["alpha".into(), "beta".into()]);
+
+        assert!(dropped.is_empty());
+        assert_eq!(datasets.len(), 1);
+        let matrix = &datasets[0].1;
+        assert!((matrix[[0, 1]] - 0.75).abs() < 1e-12);
+        assert_eq!(matrix[[1, 0]], 0.0);
     }
 
     #[test]
@@ -635,6 +708,7 @@ mod tests {
             ProcrustesMode::None,
             MdsDimMode::Fixed(3),
             true,
+            NormalizationMode::Independent,
             300.0,
         );
 
@@ -643,5 +717,75 @@ mod tests {
         assert_eq!(input.datasets[0].1.labels, mf_output.labels);
         assert_eq!(input.mds_dims, MdsDimMode::Fixed(3));
         assert!(input.normalize);
+    }
+
+    #[test]
+    fn write_gui_output_artifacts_preserves_core_as_json_contract() {
+        let result = AsPipelineResult {
+            coordinates: vec![MdsCoordinates::new(
+                vec!["alpha".into()],
+                vec![1.0, 2.0, 3.0],
+                3,
+                0.0,
+                MdsAlgorithm::Classical,
+            )],
+            procrustes: vec![ProcrustesResult {
+                aligned: MdsCoordinates::new(
+                    vec!["alpha".into()],
+                    vec![1.0, 2.0, 3.0],
+                    3,
+                    0.0,
+                    MdsAlgorithm::Classical,
+                ),
+                rotation: vec![1.0, 0.0, 0.0, 1.0],
+                scale: 1.0,
+                translation: vec![0.0, 0.0],
+                residual: 0.0,
+            }],
+            centralities: vec![CentralityState::Unavailable {
+                labels: vec!["alpha".into()],
+                reason: "distance-only".into(),
+            }],
+            distance_matrices: vec![DistanceMatrix::new(vec!["alpha".into()], vec![0.0])],
+            etv_dataset: EtvDataset {
+                source_path: None,
+                sheets: vec![EtvSheet {
+                    name: "T1".into(),
+                    sheet_index: 0,
+                    rows: vec![EtvRow {
+                        label: "alpha".into(),
+                        ..Default::default()
+                    }],
+                    edges: vec![],
+                }],
+                all_labels: vec!["alpha".into()],
+            },
+        };
+
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time failed")
+            .as_nanos();
+        let out_dir = std::env::temp_dir().join(format!("as-panel-artifacts-{stamp}"));
+
+        let dataset_path =
+            write_gui_output_artifacts(&result, &out_dir).expect("artifacts should write");
+
+        assert_eq!(
+            dataset_path.file_name().and_then(|s| s.to_str()),
+            Some("etv_dataset.json")
+        );
+
+        let as_result_json = std::fs::read_to_string(out_dir.join("as_result.json"))
+            .expect("as_result.json should exist");
+        assert!(as_result_json.contains("\"procrustes\""));
+        assert!(as_result_json.contains("\"etv_dataset\""));
+
+        let dataset_json =
+            std::fs::read_to_string(&dataset_path).expect("etv dataset json should exist");
+        assert!(dataset_json.contains("\"all_labels\""));
+        assert!(!dataset_json.contains("\"procrustes\""));
+
+        let _ = std::fs::remove_dir_all(out_dir);
     }
 }

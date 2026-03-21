@@ -722,6 +722,23 @@ impl Renderer {
         best_label
     }
 
+    fn active_sheet_index(&self, transition_index: u32) -> Option<usize> {
+        if self.dataset.sheets.is_empty() {
+            None
+        } else {
+            Some((transition_index as usize).min(self.dataset.sheets.len() - 1))
+        }
+    }
+
+    fn frame_label_positions(&self, frame: &lv_data::LisFrame) -> Vec<(String, [f32; 3])> {
+        frame
+            .labels
+            .iter()
+            .cloned()
+            .zip(frame.instances.iter().map(|inst| inst.position))
+            .collect()
+    }
+
     fn render(&mut self, window: &Window) {
         self.app_state.poll_jobs();
 
@@ -743,6 +760,7 @@ impl Renderer {
         self.ego_state.cluster_value_min = self.app_state.cluster_min;
         self.ego_state.cluster_value_max = self.app_state.cluster_max;
         self.ego_state.show_secondary = self.app_state.secondary_edges;
+        self.ego_state.direction = self.app_state.ego_direction;
         self.ego_state.shared_objects_only = self.app_state.shared_only;
         if !self.app_state.ego_mode {
             self.ego_state.selected = None;
@@ -792,25 +810,17 @@ impl Renderer {
         // Handle deferred left-click picking
         if let Some(click) = self.last_click_pos.take() {
             if self.app_state.ego_mode {
-                // Build label→position from the active sheet's rows.
-                // We use the raw row positions (not interpolated) since picking
-                // only needs screen-space proximity, not perfect interpolation.
-                let sheet = self.dataset.sheets.first();
-                if let Some(sheet) = sheet {
-                    let label_positions: Vec<(String, [f32; 3])> = sheet
-                        .rows
-                        .iter()
-                        .map(|r| (r.label.clone(), [r.x as f32, r.y as f32, r.z as f32]))
-                        .collect();
-                    let hit = self.pick_object(click, &label_positions);
-                    self.ego_state.selected = hit;
-                }
+                let label_positions = self.frame_label_positions(&frame);
+                let hit = self.pick_object(click, &label_positions);
+                self.ego_state.selected = hit;
             }
         }
 
         // Build ego-filtered instance list
-        let active_sheet = self.dataset.sheets.first();
-        let visible_set = active_sheet.map(|sheet| compute_visible_objects(sheet, &self.ego_state));
+        let active_sheet_index = self.active_sheet_index(frame.transition_index);
+        let visible_set = active_sheet_index
+            .and_then(|idx| self.dataset.sheets.get(idx))
+            .map(|sheet| compute_visible_objects(sheet, &self.ego_state));
 
         let has_ego_selection = self.ego_state.selected.is_some() && self.app_state.ego_mode;
 
@@ -818,14 +828,14 @@ impl Renderer {
         let filtered_instances: Vec<GpuInstance> = frame
             .instances
             .iter()
-            .map(|inst| {
-                let label = self.dataset.all_labels.get(inst.shape_id as usize);
+            .zip(frame.labels.iter())
+            .map(|(inst, label)| {
                 let mut gi = *inst;
-                if let (Some(vs), Some(lbl)) = (&visible_set, label) {
+                if let Some(vs) = &visible_set {
                     if has_ego_selection {
-                        if vs.contains(lbl) {
+                        if vs.contains(label) {
                             // Selected node: slightly larger + white
-                            if self.ego_state.selected.as_deref() == Some(lbl) {
+                            if self.ego_state.selected.as_deref() == Some(label.as_str()) {
                                 gi.size *= 1.05;
                                 gi.size_alpha *= 1.05;
                                 gi.color = [1.0, 1.0, 1.0, 1.0];
@@ -835,7 +845,7 @@ impl Renderer {
                             // Non-member: dim alpha
                             gi.color[3] = 0.15;
                         }
-                    } else if !vs.contains(lbl) {
+                    } else if !vs.contains(label) {
                         // Cluster-value filtered out
                         gi.color[3] = 0.0; // invisible
                     }
@@ -859,29 +869,19 @@ impl Renderer {
 
         // Build + upload edges
         if has_ego_selection {
-            if let (Some(sheet), Some(sel)) = (active_sheet, &self.ego_state.selected.clone()) {
-                let edge_rows = compute_ego_edges(sheet, sel, self.ego_state.show_secondary);
-                // Build label→position from sheet rows (raw, not interpolated)
-                let label_positions: Vec<(String, [f32; 3])> = sheet
-                    .rows
-                    .iter()
-                    .map(|r| (r.label.clone(), [r.x as f32, r.y as f32, r.z as f32]))
-                    .collect();
-                let positions: Vec<[f32; 3]> = self
-                    .dataset
-                    .all_labels
-                    .iter()
-                    .map(|l| {
-                        label_positions
-                            .iter()
-                            .find(|(lab, _)| lab == l)
-                            .map(|(_, p)| *p)
-                            .unwrap_or([0.0; 3])
-                    })
-                    .collect();
+            if let (Some(idx), Some(sel)) = (active_sheet_index, &self.ego_state.selected.clone()) {
+                let sheet = &self.dataset.sheets[idx];
+                let edge_rows = compute_ego_edges(
+                    sheet,
+                    sel,
+                    self.ego_state.show_secondary,
+                    self.ego_state.direction,
+                );
+                let positions: Vec<[f32; 3]> =
+                    frame.instances.iter().map(|inst| inst.position).collect();
                 let gpu_edges = build_gpu_edges(
                     &edge_rows,
-                    &self.dataset.all_labels,
+                    &frame.labels,
                     &positions,
                     sel,
                     self.ego_state.show_secondary,

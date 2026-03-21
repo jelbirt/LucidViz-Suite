@@ -421,6 +421,8 @@ After laying out nodes, we need visual encodings — what determines node size, 
 
 This step is only well-defined when AlignSpace has an adjacency graph to analyze. If AS is running from a precomputed distance matrix (for example, MatrixForge similarity converted directly to distance), the current code treats graph centrality as unavailable rather than inventing zero-valued metrics.
 
+Even though the LV dataset/runtime path now preserves directed `from -> to` edges end-to-end, the current centrality stage still uses an undirected compatibility contract: it scans only the upper triangle of the adjacency matrix and computes degree/closeness/betweenness on that undirected view. In other words, preserved edge direction affects visualization/runtime semantics, but not yet the centrality report.
+
 When an adjacency graph is available, both distance/closeness and betweenness now use weighted shortest paths with edge cost `1 / weight`, so stronger ties behave as shorter paths consistently across the centrality report.
 
 ---
@@ -592,11 +594,18 @@ aligned[i] = s × A[i] × Rᵀ + t
 
 **Why does this matter?** Without Procrustes alignment, animated transitions between time slices would show wild, disorienting rotations even when the underlying network structure barely changed. With alignment, nodes smoothly drift to their new positions.
 
+The code now supports two time-series alignment strategies:
+
+- `TimeSeries`: align each slice to the previous already-aligned slice. This can give very smooth local transitions, but may accumulate drift over long runs.
+- `TimeSeriesAnchored`: align every later slice directly to slice 0. This reduces drift and keeps a stable global reference frame.
+
 ---
 
 ## 8. Step 7 — Animating Between Frames (LIS Interpolation)
 
 The **Lucid Interpolation System (LIS)** creates smooth animations between time slices by generating intermediate frames using linear interpolation.
+
+LIS depends on a canonical `all_labels` union across sheets. Current JSON/XLSX load paths rebuild and validate that union from sheet rows before rendering so interpolation and active-frame identity stay consistent.
 
 **The parameter α (alpha):**
 

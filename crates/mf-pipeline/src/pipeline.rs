@@ -2,7 +2,9 @@
 
 use anyhow::{bail, Result};
 use as_pipeline::pipeline::mf_output_to_distance_matrix;
-use as_pipeline::types::{AsDistancePipelineInput, MdsConfig, MdsDimMode, ProcrustesMode};
+use as_pipeline::types::{
+    AsDistancePipelineInput, MdsConfig, MdsDimMode, NormalizationMode, ProcrustesMode,
+};
 
 use crate::centrality::compute_centrality_full;
 use crate::cooccurrence::{build_cooccurrence, build_cooccurrence_with_vocab};
@@ -170,6 +172,7 @@ pub fn mf_series_output_to_as_input(
     procrustes_mode: ProcrustesMode,
     mds_dims: MdsDimMode,
     normalize: bool,
+    normalization_mode: NormalizationMode,
     target_range: f64,
     procrustes_scale: bool,
 ) -> AsDistancePipelineInput {
@@ -195,6 +198,7 @@ pub fn mf_series_output_to_as_input(
         procrustes_mode,
         mds_dims,
         normalize,
+        normalization_mode,
         target_range,
         procrustes_scale,
     }

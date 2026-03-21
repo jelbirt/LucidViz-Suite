@@ -4,6 +4,7 @@
 //! for the Lucid Visualization Suite's ego-cluster highlighting feature.
 
 use lv_data::{EdgeRow, EtvSheet};
+use lv_gui::EgoEdgeDirection;
 use lv_renderer::GpuEdge;
 use std::collections::HashSet;
 
@@ -16,6 +17,8 @@ pub struct EgoClusterState {
     pub selected: Option<String>,
     /// Show secondary edges (edges from ego-members to their neighbours).
     pub show_secondary: bool,
+    /// Directional interpretation of ego expansion.
+    pub direction: EgoEdgeDirection,
     /// Only show objects that appear in ≥2 other nodes' ego clusters.
     pub shared_objects_only: bool,
     /// `cluster_value` lower bound (inclusive).
@@ -29,11 +32,48 @@ impl Default for EgoClusterState {
         Self {
             selected: None,
             show_secondary: false,
+            direction: EgoEdgeDirection::Both,
             shared_objects_only: false,
             cluster_value_min: f64::NEG_INFINITY,
             cluster_value_max: f64::INFINITY,
         }
     }
+}
+
+fn edge_matches_direction(edge: &EdgeRow, selected: &str, direction: EgoEdgeDirection) -> bool {
+    match direction {
+        EgoEdgeDirection::Incoming => edge.to == selected,
+        EgoEdgeDirection::Outgoing => edge.from == selected,
+        EgoEdgeDirection::Both => edge.from == selected || edge.to == selected,
+    }
+}
+
+fn neighbor_for_direction(
+    edge: &EdgeRow,
+    selected: &str,
+    direction: EgoEdgeDirection,
+) -> Option<String> {
+    match direction {
+        EgoEdgeDirection::Incoming if edge.to == selected => Some(edge.from.clone()),
+        EgoEdgeDirection::Outgoing if edge.from == selected => Some(edge.to.clone()),
+        EgoEdgeDirection::Both if edge.from == selected => Some(edge.to.clone()),
+        EgoEdgeDirection::Both if edge.to == selected => Some(edge.from.clone()),
+        _ => None,
+    }
+}
+
+fn directional_neighbors(
+    sheet: &EtvSheet,
+    selected: &str,
+    direction: EgoEdgeDirection,
+    filtered: &HashSet<String>,
+) -> HashSet<String> {
+    sheet
+        .edges
+        .iter()
+        .filter_map(|e| neighbor_for_direction(e, selected, direction))
+        .filter(|label| filtered.contains(label))
+        .collect()
 }
 
 // ── Visibility ────────────────────────────────────────────────────────────────
@@ -65,19 +105,7 @@ pub fn compute_visible_objects(sheet: &EtvSheet, state: &EgoClusterState) -> Has
     };
 
     // Direct ego-members of `sel`
-    let direct: HashSet<String> = sheet
-        .edges
-        .iter()
-        .filter_map(|e| {
-            if &e.from == sel && filtered.contains(&e.to) {
-                Some(e.to.clone())
-            } else if &e.to == sel && filtered.contains(&e.from) {
-                Some(e.from.clone())
-            } else {
-                None
-            }
-        })
-        .collect();
+    let direct = directional_neighbors(sheet, sel, state.direction, &filtered);
 
     let mut visible: HashSet<String> = HashSet::new();
     visible.insert(sel.clone());
@@ -86,12 +114,8 @@ pub fn compute_visible_objects(sheet: &EtvSheet, state: &EgoClusterState) -> Has
     if state.show_secondary {
         // Add nodes reachable from any direct member
         for member in &direct {
-            for e in &sheet.edges {
-                if &e.from == member && filtered.contains(&e.to) {
-                    visible.insert(e.to.clone());
-                } else if &e.to == member && filtered.contains(&e.from) {
-                    visible.insert(e.from.clone());
-                }
+            for label in directional_neighbors(sheet, member, state.direction, &filtered) {
+                visible.insert(label);
             }
         }
     }
@@ -113,10 +137,8 @@ pub fn compute_visible_objects(sheet: &EtvSheet, state: &EgoClusterState) -> Has
                 .iter()
                 .filter(|r| r.label != *candidate && filtered.contains(&r.label))
                 .filter(|r| {
-                    sheet.edges.iter().any(|e| {
-                        (e.from == r.label && e.to == *candidate)
-                            || (e.to == r.label && e.from == *candidate)
-                    })
+                    directional_neighbors(sheet, &r.label, state.direction, &filtered)
+                        .contains(candidate)
                 })
                 .count();
             if count >= 2 {
@@ -137,37 +159,34 @@ pub fn compute_visible_objects(sheet: &EtvSheet, state: &EgoClusterState) -> Has
 ///
 /// - Primary edges: selected → direct member (white).
 /// - Secondary edges (if `show_secondary`): member → their neighbours (grey).
-pub fn compute_ego_edges(sheet: &EtvSheet, selected: &str, show_secondary: bool) -> Vec<EdgeRow> {
+pub fn compute_ego_edges(
+    sheet: &EtvSheet,
+    selected: &str,
+    show_secondary: bool,
+    direction: EgoEdgeDirection,
+) -> Vec<EdgeRow> {
     let mut result: Vec<EdgeRow> = Vec::new();
 
+    let filtered: HashSet<String> = sheet.rows.iter().map(|r| r.label.clone()).collect();
+
     // Collect direct members
-    let direct: HashSet<String> = sheet
-        .edges
-        .iter()
-        .filter_map(|e| {
-            if e.from == selected {
-                Some(e.to.clone())
-            } else if e.to == selected {
-                Some(e.from.clone())
-            } else {
-                None
-            }
-        })
-        .collect();
+    let direct = directional_neighbors(sheet, selected, direction, &filtered);
 
     // Primary edges
     for e in &sheet.edges {
-        if e.from == selected || e.to == selected {
+        if edge_matches_direction(e, selected, direction) {
             result.push(e.clone());
         }
     }
 
     if show_secondary {
-        for e in &sheet.edges {
-            let involves_member = direct.contains(&e.from) || direct.contains(&e.to);
-            let involves_selected = e.from == selected || e.to == selected;
-            if involves_member && !involves_selected {
-                result.push(e.clone());
+        for member in &direct {
+            for e in &sheet.edges {
+                let matches_member = edge_matches_direction(e, member, direction);
+                let involves_selected = e.from == selected || e.to == selected;
+                if matches_member && !involves_selected {
+                    result.push(e.clone());
+                }
             }
         }
     }
@@ -177,18 +196,17 @@ pub fn compute_ego_edges(sheet: &EtvSheet, selected: &str, show_secondary: bool)
 
 // ── GpuEdge construction ──────────────────────────────────────────────────────
 
-/// Convert edge rows to `GpuEdge`s, resolving positions from the current frame's
-/// instance list.  Uses a label→position lookup built from `instances` (paired
-/// with `all_labels`).
+/// Convert edge rows to `GpuEdge`s, resolving positions from the current frame.
+/// Uses a label→position lookup built from `frame_labels` and `positions`.
 pub fn build_gpu_edges(
     edge_rows: &[EdgeRow],
-    all_labels: &[String],
+    frame_labels: &[String],
     positions: &[[f32; 3]],
     selected: &str,
     show_secondary: bool,
 ) -> Vec<GpuEdge> {
     use std::collections::HashMap;
-    let label_to_pos: HashMap<&str, [f32; 3]> = all_labels
+    let label_to_pos: HashMap<&str, [f32; 3]> = frame_labels
         .iter()
         .zip(positions.iter())
         .map(|(l, &p)| (l.as_str(), p))
@@ -265,7 +283,7 @@ mod tests {
         let mut state = EgoClusterState::default();
         state.selected = Some("A".to_string());
 
-        let edges = compute_ego_edges(&sheet, "A", false);
+        let edges = compute_ego_edges(&sheet, "A", false, EgoEdgeDirection::Both);
         let targets: HashSet<String> = edges
             .iter()
             .flat_map(|e| [e.from.clone(), e.to.clone()])
@@ -280,7 +298,7 @@ mod tests {
     fn test_secondary_edges() {
         // B has edge to D; with show_secondary=true, D should appear in edges
         let sheet = make_sheet(vec![("A", "B"), ("A", "C"), ("B", "D")]);
-        let edges = compute_ego_edges(&sheet, "A", true);
+        let edges = compute_ego_edges(&sheet, "A", true, EgoEdgeDirection::Both);
         let targets: HashSet<String> = edges
             .iter()
             .flat_map(|e| [e.from.clone(), e.to.clone()])
@@ -323,5 +341,65 @@ mod tests {
         assert!(visible.contains("C"), "C should be in shared set");
         // A is always kept
         assert!(visible.contains("A"));
+    }
+
+    #[test]
+    fn test_visible_objects_respects_outgoing_direction() {
+        let sheet = make_sheet(vec![("A", "B"), ("C", "A"), ("B", "D")]);
+        let mut state = EgoClusterState::default();
+        state.selected = Some("A".to_string());
+        state.direction = EgoEdgeDirection::Outgoing;
+
+        let visible = compute_visible_objects(&sheet, &state);
+
+        assert!(visible.contains("A"));
+        assert!(visible.contains("B"));
+        assert!(!visible.contains("C"));
+    }
+
+    #[test]
+    fn test_visible_objects_respects_incoming_direction() {
+        let sheet = make_sheet(vec![("A", "B"), ("C", "A"), ("D", "C")]);
+        let mut state = EgoClusterState::default();
+        state.selected = Some("A".to_string());
+        state.direction = EgoEdgeDirection::Incoming;
+
+        let visible = compute_visible_objects(&sheet, &state);
+
+        assert!(visible.contains("A"));
+        assert!(visible.contains("C"));
+        assert!(!visible.contains("B"));
+    }
+
+    #[test]
+    fn test_compute_ego_edges_respects_direction_and_secondary() {
+        let sheet = make_sheet(vec![("A", "B"), ("C", "A"), ("B", "D"), ("E", "C")]);
+
+        let outgoing = compute_ego_edges(&sheet, "A", true, EgoEdgeDirection::Outgoing);
+        assert!(outgoing.iter().any(|e| e.from == "A" && e.to == "B"));
+        assert!(outgoing.iter().any(|e| e.from == "B" && e.to == "D"));
+        assert!(!outgoing.iter().any(|e| e.from == "C" && e.to == "A"));
+
+        let incoming = compute_ego_edges(&sheet, "A", true, EgoEdgeDirection::Incoming);
+        assert!(incoming.iter().any(|e| e.from == "C" && e.to == "A"));
+        assert!(incoming.iter().any(|e| e.from == "E" && e.to == "C"));
+        assert!(!incoming.iter().any(|e| e.from == "A" && e.to == "B"));
+    }
+
+    #[test]
+    fn test_build_gpu_edges_uses_frame_label_order() {
+        let edges = vec![EdgeRow {
+            from: "A".into(),
+            to: "B".into(),
+            strength: 1.0,
+        }];
+        let frame_labels = vec!["B".to_string(), "A".to_string()];
+        let positions = vec![[2.0, 0.0, 0.0], [1.0, 0.0, 0.0]];
+
+        let gpu_edges = build_gpu_edges(&edges, &frame_labels, &positions, "A", false);
+
+        assert_eq!(gpu_edges.len(), 1);
+        assert_eq!(gpu_edges[0].from_pos, [1.0, 0.0, 0.0]);
+        assert_eq!(gpu_edges[0].to_pos, [2.0, 0.0, 0.0]);
     }
 }

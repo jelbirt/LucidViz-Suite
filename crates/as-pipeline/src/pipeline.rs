@@ -8,12 +8,12 @@ use lv_data::SimToDistMethod;
 
 use crate::centrality::compute_centrality;
 use crate::mds::run_mds;
-use crate::normalize::normalize_coordinates;
+use crate::normalize::{normalize_coordinate_series, normalize_coordinates};
 use crate::procrustes::procrustes;
 use crate::structural_eq::compute_se_matrix;
 use crate::types::{
     AsDistancePipelineInput, AsPipelineInput, AsPipelineResult, CentralityState, DistanceMatrix,
-    MdsCoordinates, ProcrustesMode, ProcrustesResult,
+    MdsCoordinates, NormalizationMode, ProcrustesMode, ProcrustesResult,
 };
 
 /// Run the full AlignSpace pipeline.
@@ -62,9 +62,11 @@ pub fn run_pipeline(input: &AsPipelineInput) -> Result<AsPipelineResult> {
 
     // Normalize if requested.
     if input.normalize {
-        for coords in coordinates.iter_mut() {
-            normalize_coordinates(coords, input.target_range);
-        }
+        normalize_output_coordinates(
+            &mut coordinates,
+            input.normalization_mode,
+            input.target_range,
+        );
     }
 
     // Build a minimal EtvDataset from the last time step's coordinates.
@@ -110,9 +112,11 @@ pub fn run_distance_pipeline(input: &AsDistancePipelineInput) -> Result<AsPipeli
         .collect();
 
     if input.normalize {
-        for coords in coordinates.iter_mut() {
-            normalize_coordinates(coords, input.target_range);
-        }
+        normalize_output_coordinates(
+            &mut coordinates,
+            input.normalization_mode,
+            input.target_range,
+        );
     }
 
     let dataset_names: Vec<(String, Array2<f64>)> = input
@@ -233,6 +237,24 @@ fn align_coordinates(
             }
             proc_results
         }
+        ProcrustesMode::TimeSeriesAnchored => {
+            let reference = raw_coords[0].clone();
+            let mut proc_results: Vec<ProcrustesResult> = Vec::new();
+
+            proc_results.push(ProcrustesResult {
+                aligned: reference.clone(),
+                rotation: identity_rotation(reference.dims),
+                scale: 1.0,
+                translation: vec![0.0; reference.dims],
+                residual: 0.0,
+            });
+
+            for source in raw_coords.iter().skip(1) {
+                proc_results.push(procrustes(source, &reference, procrustes_scale)?);
+            }
+
+            proc_results
+        }
         ProcrustesMode::OptimalChoice => {
             let reference_idx = choose_optimal_reference(raw_coords, procrustes_scale)?;
             let reference = raw_coords[reference_idx].clone();
@@ -255,6 +277,21 @@ fn align_coordinates(
     };
 
     Ok(results)
+}
+
+fn normalize_output_coordinates(
+    coordinates: &mut [MdsCoordinates],
+    normalization_mode: NormalizationMode,
+    target_range: f64,
+) {
+    match normalization_mode {
+        NormalizationMode::Independent => {
+            for coords in coordinates.iter_mut() {
+                normalize_coordinates(coords, target_range);
+            }
+        }
+        NormalizationMode::Global => normalize_coordinate_series(coordinates, target_range),
+    }
 }
 
 fn choose_optimal_reference(
@@ -313,9 +350,9 @@ fn build_etv_dataset(
     }
 
     // Create one sheet per time step. For adjacency-backed inputs, preserve
-    // one undirected edge per connected pair by taking the maximum weight from
-    // the upper/lower triangle. Distance-backed inputs pass zero-adjacency
-    // placeholders, so they export coordinate-only sheets with no edges.
+    // directed edges exactly as they appear in the adjacency matrix.
+    // Distance-backed inputs pass zero-adjacency placeholders, so they export
+    // coordinate-only sheets with no edges.
     let sheets: Vec<EtvSheet> = coordinates
         .iter()
         .enumerate()
@@ -370,19 +407,10 @@ fn build_etv_dataset(
         })
         .collect();
 
-    let mut all_labels = Vec::new();
-    for coords in coordinates {
-        for label in &coords.labels {
-            if !all_labels.contains(label) {
-                all_labels.push(label.clone());
-            }
-        }
-    }
-
     EtvDataset {
         source_path: None,
+        all_labels: EtvDataset::canonical_all_labels_from_sheets(&sheets),
         sheets,
-        all_labels,
     }
 }
 
@@ -391,8 +419,11 @@ fn adjacency_to_edges(labels: &[String], adj: &Array2<f64>) -> Vec<lv_data::sche
     let mut edges = Vec::new();
 
     for i in 0..n {
-        for j in (i + 1)..n {
-            let strength = adj[[i, j]].max(adj[[j, i]]);
+        for j in 0..n {
+            if i == j {
+                continue;
+            }
+            let strength = adj[[i, j]];
             if strength != 0.0 {
                 edges.push(lv_data::schema::EdgeRow {
                     from: labels[i].clone(),
@@ -428,10 +459,52 @@ mod tests {
         assert_eq!(etv.sheets.len(), 1);
         assert_eq!(etv.sheets[0].rows[0].z, 3.0);
         assert_eq!(etv.sheets[0].rows[1].z, -3.0);
+        assert_eq!(etv.sheets[0].edges.len(), 2);
+        assert_eq!(etv.sheets[0].edges[0].from, "alpha");
+        assert_eq!(etv.sheets[0].edges[0].to, "beta");
+        assert!((etv.sheets[0].edges[0].strength - 0.75).abs() < 1e-12);
+        assert_eq!(etv.sheets[0].edges[1].from, "beta");
+        assert_eq!(etv.sheets[0].edges[1].to, "alpha");
+        assert!((etv.sheets[0].edges[1].strength - 0.75).abs() < 1e-12);
+    }
+
+    #[test]
+    fn build_etv_dataset_preserves_directed_edges() {
+        let coords = MdsCoordinates::new(
+            vec!["alpha".into(), "beta".into()],
+            vec![1.0, 2.0, -1.0, -2.0],
+            2,
+            0.0,
+            MdsAlgorithm::Classical,
+        );
+        let datasets = vec![("T1".to_string(), array![[0.0, 0.75], [0.0, 0.0]])];
+
+        let etv = build_etv_dataset(&[coords], &datasets);
+
         assert_eq!(etv.sheets[0].edges.len(), 1);
         assert_eq!(etv.sheets[0].edges[0].from, "alpha");
         assert_eq!(etv.sheets[0].edges[0].to, "beta");
         assert!((etv.sheets[0].edges[0].strength - 0.75).abs() < 1e-12);
+    }
+
+    #[test]
+    fn build_etv_dataset_exports_reciprocal_edges_separately() {
+        let coords = MdsCoordinates::new(
+            vec!["alpha".into(), "beta".into()],
+            vec![1.0, 2.0, -1.0, -2.0],
+            2,
+            0.0,
+            MdsAlgorithm::Classical,
+        );
+        let datasets = vec![("T1".to_string(), array![[0.0, 0.75], [0.5, 0.0]])];
+
+        let etv = build_etv_dataset(&[coords], &datasets);
+
+        assert_eq!(etv.sheets[0].edges.len(), 2);
+        assert_eq!(etv.sheets[0].edges[0].from, "alpha");
+        assert_eq!(etv.sheets[0].edges[0].to, "beta");
+        assert_eq!(etv.sheets[0].edges[1].from, "beta");
+        assert_eq!(etv.sheets[0].edges[1].to, "alpha");
     }
 
     #[test]

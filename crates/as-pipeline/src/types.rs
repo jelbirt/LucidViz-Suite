@@ -172,10 +172,20 @@ pub enum MdsDimMode {
 pub enum ProcrustesMode {
     /// Align each time-step to the previous (time series).
     TimeSeries,
+    /// Align each time-step to the first slice to avoid chain drift.
+    TimeSeriesAnchored,
     /// Find the pair with best alignment and propagate.
     OptimalChoice,
     /// Skip Procrustes entirely.
     None,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NormalizationMode {
+    /// Scale each time-step independently to fit the target range.
+    Independent,
+    /// Scale the whole series with one shared factor.
+    Global,
 }
 
 // ---------------------------------------------------------------------------
@@ -191,6 +201,7 @@ pub struct AsPipelineInput {
     pub procrustes_mode: ProcrustesMode,
     pub mds_dims: MdsDimMode,
     pub normalize: bool,
+    pub normalization_mode: NormalizationMode,
     pub target_range: f64,
     pub procrustes_scale: bool,
 }
@@ -203,6 +214,7 @@ pub struct AsDistancePipelineInput {
     pub procrustes_mode: ProcrustesMode,
     pub mds_dims: MdsDimMode,
     pub normalize: bool,
+    pub normalization_mode: NormalizationMode,
     pub target_range: f64,
     pub procrustes_scale: bool,
 }

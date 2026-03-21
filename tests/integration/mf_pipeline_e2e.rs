@@ -285,7 +285,9 @@ fn test_mf_series_pipeline_per_file_shared_vocab() {
 #[test]
 fn test_mf_series_pipeline_bridges_to_as_distance_pipeline() {
     use as_pipeline::pipeline::run_distance_pipeline;
-    use as_pipeline::types::{CentralityState, MdsConfig, MdsDimMode, ProcrustesMode};
+    use as_pipeline::types::{
+        CentralityState, MdsConfig, MdsDimMode, NormalizationMode, ProcrustesMode,
+    };
 
     let dir = temp_corpus_dir(&[
         ("a.txt", "alpha beta alpha gamma"),
@@ -313,6 +315,7 @@ fn test_mf_series_pipeline_bridges_to_as_distance_pipeline() {
         ProcrustesMode::TimeSeries,
         MdsDimMode::Visual,
         true,
+        NormalizationMode::Independent,
         300.0,
         true,
     );
@@ -330,7 +333,7 @@ fn test_mf_series_pipeline_bridges_to_as_distance_pipeline() {
 #[test]
 fn test_single_output_and_single_slice_series_produce_same_distance_dataset() {
     use as_pipeline::pipeline::{mf_output_to_distance_matrix, run_distance_pipeline};
-    use as_pipeline::types::{MdsConfig, MdsDimMode, ProcrustesMode};
+    use as_pipeline::types::{MdsConfig, MdsDimMode, NormalizationMode, ProcrustesMode};
     use mf_pipeline::types::{MfSeriesOutput, MfSlice};
 
     let output = run_mf_pipeline(&MfPipelineConfig {
@@ -359,6 +362,7 @@ fn test_single_output_and_single_slice_series_produce_same_distance_dataset() {
         procrustes_mode: ProcrustesMode::None,
         mds_dims: MdsDimMode::Fixed(3),
         normalize: true,
+        normalization_mode: NormalizationMode::Independent,
         target_range: 300.0,
         procrustes_scale: true,
     };
@@ -383,6 +387,7 @@ fn test_single_output_and_single_slice_series_produce_same_distance_dataset() {
         ProcrustesMode::None,
         MdsDimMode::Fixed(3),
         true,
+        NormalizationMode::Independent,
         300.0,
         true,
     );

@@ -12,6 +12,7 @@
 use crate::app_state::EgoClusterState;
 use anyhow::{Context, Result};
 use lv_data::LisConfig;
+use lv_gui::EgoEdgeDirection;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -74,6 +75,7 @@ impl From<LisConfigSnapshot> for LisConfig {
 pub struct EgoSnapshot {
     pub selected: Option<String>,
     pub show_secondary: bool,
+    pub direction: EgoEdgeDirection,
     pub shared_objects_only: bool,
     pub cluster_value_min: f64,
     pub cluster_value_max: f64,
@@ -84,6 +86,7 @@ impl From<&EgoClusterState> for EgoSnapshot {
         Self {
             selected: e.selected.clone(),
             show_secondary: e.show_secondary,
+            direction: e.direction,
             shared_objects_only: e.shared_objects_only,
             cluster_value_min: e.cluster_value_min,
             cluster_value_max: e.cluster_value_max,
@@ -96,6 +99,7 @@ impl From<EgoSnapshot> for EgoClusterState {
         EgoClusterState {
             selected: s.selected,
             show_secondary: s.show_secondary,
+            direction: s.direction,
             shared_objects_only: s.shared_objects_only,
             cluster_value_min: s.cluster_value_min,
             cluster_value_max: s.cluster_value_max,
@@ -194,6 +198,7 @@ mod tests {
             ego: EgoSnapshot {
                 selected: Some("node_0".to_string()),
                 show_secondary: false,
+                direction: EgoEdgeDirection::Both,
                 shared_objects_only: true,
                 cluster_value_min: 0.0,
                 cluster_value_max: 5.0,
@@ -205,6 +210,7 @@ mod tests {
         assert_eq!(snap2.name, "test_session");
         assert_eq!(snap2.slice_index, 7);
         assert_eq!(snap2.ego.selected, Some("node_0".to_string()));
+        assert_eq!(snap2.ego.direction, EgoEdgeDirection::Both);
     }
 
     #[test]
@@ -241,6 +247,7 @@ mod tests {
             ego: EgoSnapshot {
                 selected: None,
                 show_secondary: false,
+                direction: EgoEdgeDirection::Both,
                 shared_objects_only: false,
                 cluster_value_min: 0.0,
                 cluster_value_max: 100.0,

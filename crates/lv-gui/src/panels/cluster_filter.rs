@@ -1,6 +1,6 @@
 //! Cluster filter panel.
 
-use crate::state::AppState;
+use crate::state::{AppState, EgoEdgeDirection};
 
 /// Panel for filtering objects by cluster value.
 #[derive(Default)]
@@ -55,6 +55,28 @@ impl ClusterFilterPanel {
 
         ui.separator();
         ui.checkbox(&mut state.ego_mode, "Show ego cluster");
+        ui.horizontal(|ui| {
+            ui.label("Edge direction:");
+            egui::ComboBox::from_id_salt("ego_direction")
+                .selected_text(match state.ego_direction {
+                    EgoEdgeDirection::Incoming => "Incoming",
+                    EgoEdgeDirection::Outgoing => "Outgoing",
+                    EgoEdgeDirection::Both => "Both",
+                })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(
+                        &mut state.ego_direction,
+                        EgoEdgeDirection::Incoming,
+                        "Incoming",
+                    );
+                    ui.selectable_value(
+                        &mut state.ego_direction,
+                        EgoEdgeDirection::Outgoing,
+                        "Outgoing",
+                    );
+                    ui.selectable_value(&mut state.ego_direction, EgoEdgeDirection::Both, "Both");
+                });
+        });
         ui.checkbox(&mut state.secondary_edges, "Include secondary edges");
         ui.checkbox(&mut state.shared_only, "Shared objects only");
 

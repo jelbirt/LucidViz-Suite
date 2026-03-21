@@ -126,6 +126,7 @@ mod tests {
     fn dummy_frame(local_slice: u32) -> LisFrame {
         LisFrame {
             instances: vec![],
+            labels: vec![],
             slice_index: local_slice,
             transition_index: 0,
             local_slice,

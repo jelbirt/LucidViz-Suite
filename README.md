@@ -159,6 +159,11 @@ lucid-viz/
 - `MdsDimMode::Visual` is the legacy public enum name for the current 2D planar layout mode.
 - `as-pipeline` can also start from adjacency matrices, where it computes structural-equivalence distances internally.
 - Precomputed distance inputs do not imply a graph, so AS now marks centrality as unavailable for those runs instead of emitting zero-filled metrics.
+- Temporal AS runs now support `NormalizationMode::Independent` (per-slice scaling) and `NormalizationMode::Global` (one shared scale across the whole series).
+- Temporal Procrustes now supports both chained `TimeSeries` alignment and `TimeSeriesAnchored`, which keeps every later slice aligned to slice 0 to reduce long-run drift.
+- LV dataset loading canonicalizes `all_labels` from sheet rows and validates the result before runtime use.
+- Dataset -> AS ingestion, AS export, LV JSON/XLSX I/O, and LV ego/runtime overlays now preserve directed `EdgeRow { from, to }` semantics end-to-end.
+- AS centrality remains intentionally undirected today for backward compatibility: it derives metrics from the upper triangle of the adjacency matrix even when the preserved LV edge set is directed.
 
 ## License
 

@@ -55,22 +55,25 @@ pub fn build_lis_buffer(dataset: &EtvDataset, config: &LisConfig) -> LisBuffer {
 
         for k in 0..lis {
             let alpha = k as f64 / lis as f64;
-            let mut instances: Vec<GpuInstance> = Vec::new();
+            let mut labeled_instances: Vec<(String, GpuInstance)> = Vec::new();
 
             for label in &dataset.all_labels {
                 let row_a = sheet_a.rows.iter().find(|r| &r.label == label);
                 let row_b = sheet_b.rows.iter().find(|r| &r.label == label);
 
                 if let Some(inst) = interpolate(row_a, row_b, alpha, label) {
-                    instances.push(inst);
+                    labeled_instances.push((label.clone(), inst));
                 }
             }
 
             // Sort by shape_id for minimal draw-call switching
-            instances.sort_by_key(|i| i.shape_id);
+            labeled_instances.sort_by_key(|(_, inst)| inst.shape_id);
+            let (labels, instances): (Vec<String>, Vec<GpuInstance>) =
+                labeled_instances.into_iter().unzip();
 
             frames.push(LisFrame {
                 instances,
+                labels,
                 slice_index: t as u32 * lis + k,
                 transition_index: t as u32,
                 local_slice: k,
@@ -109,18 +112,21 @@ pub fn compute_frame(dataset: &EtvDataset, config: &LisConfig, slice_index: u32)
         sheet_a
     };
 
-    let mut instances: Vec<GpuInstance> = Vec::new();
+    let mut labeled_instances: Vec<(String, GpuInstance)> = Vec::new();
     for label in &dataset.all_labels {
         let row_a = sheet_a.rows.iter().find(|r| &r.label == label);
         let row_b = sheet_b.rows.iter().find(|r| &r.label == label);
         if let Some(inst) = interpolate(row_a, row_b, alpha, label) {
-            instances.push(inst);
+            labeled_instances.push((label.clone(), inst));
         }
     }
-    instances.sort_by_key(|i| i.shape_id);
+    labeled_instances.sort_by_key(|(_, inst)| inst.shape_id);
+    let (labels, instances): (Vec<String>, Vec<GpuInstance>) =
+        labeled_instances.into_iter().unzip();
 
     LisFrame {
         instances,
+        labels,
         slice_index,
         transition_index,
         local_slice,
@@ -191,5 +197,73 @@ impl GpuInstanceExt for GpuInstance {
     fn with_size(mut self, size: f32) -> GpuInstance {
         self.size = size;
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lv_data::{EtvDataset, EtvRow, EtvSheet, ShapeKind};
+
+    fn make_dataset() -> EtvDataset {
+        let sheet = EtvSheet {
+            name: "T0".into(),
+            sheet_index: 0,
+            rows: vec![
+                EtvRow {
+                    label: "cube".into(),
+                    shape: ShapeKind::Cube,
+                    x: 4.0,
+                    ..Default::default()
+                },
+                EtvRow {
+                    label: "sphere".into(),
+                    shape: ShapeKind::Sphere,
+                    x: 1.0,
+                    ..Default::default()
+                },
+            ],
+            edges: vec![],
+        };
+
+        EtvDataset {
+            source_path: None,
+            sheets: vec![sheet],
+            all_labels: vec!["cube".into(), "sphere".into()],
+        }
+    }
+
+    #[test]
+    fn build_lis_buffer_keeps_labels_aligned_with_sorted_instances() {
+        let buffer = build_lis_buffer(
+            &make_dataset(),
+            &LisConfig {
+                lis_value: 4,
+                ..Default::default()
+            },
+        );
+
+        let frame = &buffer.frames[0];
+        assert_eq!(frame.labels, vec!["sphere", "cube"]);
+        assert_eq!(frame.instances.len(), frame.labels.len());
+        assert_eq!(frame.instances[0].shape_id, ShapeKind::Sphere.gpu_id());
+        assert_eq!(frame.instances[1].shape_id, ShapeKind::Cube.gpu_id());
+        assert_eq!(frame.instances[0].position, [1.0, 0.0, 0.0]);
+        assert_eq!(frame.instances[1].position, [4.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn compute_frame_keeps_labels_aligned_with_instances() {
+        let frame = compute_frame(
+            &make_dataset(),
+            &LisConfig {
+                lis_value: 4,
+                ..Default::default()
+            },
+            0,
+        );
+
+        assert_eq!(frame.labels, vec!["sphere", "cube"]);
+        assert_eq!(frame.instances.len(), frame.labels.len());
     }
 }

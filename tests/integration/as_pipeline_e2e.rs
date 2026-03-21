@@ -6,7 +6,9 @@
 
 use as_pipeline::{
     pipeline::run_pipeline,
-    types::{AsPipelineInput, CentralityState, MdsConfig, MdsDimMode, ProcrustesMode},
+    types::{
+        AsPipelineInput, CentralityState, MdsConfig, MdsDimMode, NormalizationMode, ProcrustesMode,
+    },
 };
 use ndarray::Array2;
 use std::io::{BufRead, BufReader};
@@ -60,6 +62,7 @@ fn test_as_pipeline_e2e_single_timestep() {
         procrustes_mode: ProcrustesMode::None,
         mds_dims: MdsDimMode::Visual, // 2D
         normalize: true,
+        normalization_mode: NormalizationMode::Independent,
         target_range: 1.0,
         procrustes_scale: false,
     };
@@ -134,6 +137,7 @@ fn test_as_pipeline_e2e_two_timesteps() {
         procrustes_mode: ProcrustesMode::TimeSeries,
         mds_dims: MdsDimMode::Visual,
         normalize: true,
+        normalization_mode: NormalizationMode::Independent,
         target_range: 1.0,
         procrustes_scale: false,
     };
@@ -179,6 +183,7 @@ fn test_as_pipeline_optimal_choice_runs_and_preserves_labels() {
         procrustes_mode: ProcrustesMode::OptimalChoice,
         mds_dims: MdsDimMode::Visual,
         normalize: false,
+        normalization_mode: NormalizationMode::Independent,
         target_range: 1.0,
         procrustes_scale: false,
     };
@@ -216,6 +221,7 @@ fn test_as_pipeline_3d_export_preserves_z_coordinates() {
         procrustes_mode: ProcrustesMode::None,
         mds_dims: MdsDimMode::Fixed(3),
         normalize: false,
+        normalization_mode: NormalizationMode::Independent,
         target_range: 1.0,
         procrustes_scale: false,
     };
@@ -230,4 +236,101 @@ fn test_as_pipeline_3d_export_preserves_z_coordinates() {
         assert_eq!(row.label, coords.labels[i]);
         assert!((row.z - coords.data[i * coords.dims + 2]).abs() < 1e-12);
     }
+}
+
+#[test]
+fn test_as_pipeline_global_normalization_preserves_relative_scale() {
+    let labels = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+    let adj1 = Array2::from_shape_vec((3, 3), vec![0.0, 1.0, 0.2, 1.0, 0.0, 0.2, 0.2, 0.2, 0.0])
+        .expect("adj1 shape");
+    let adj2 = Array2::from_shape_vec((3, 3), vec![0.0, 10.0, 0.2, 10.0, 0.0, 0.2, 0.2, 0.2, 0.0])
+        .expect("adj2 shape");
+
+    let result = run_pipeline(&AsPipelineInput {
+        datasets: vec![("T1".to_string(), adj1), ("T2".to_string(), adj2)],
+        labels,
+        mds_config: MdsConfig::Classical,
+        procrustes_mode: ProcrustesMode::None,
+        mds_dims: MdsDimMode::Visual,
+        normalize: true,
+        normalization_mode: NormalizationMode::Global,
+        target_range: 2.0,
+        procrustes_scale: false,
+    })
+    .expect("global normalization pipeline failed");
+
+    let max0 = result.coordinates[0]
+        .data
+        .iter()
+        .map(|v| v.abs())
+        .fold(0.0f64, f64::max);
+    let max1 = result.coordinates[1]
+        .data
+        .iter()
+        .map(|v| v.abs())
+        .fold(0.0f64, f64::max);
+
+    assert!(max1 <= 2.0 + 1e-10);
+    assert!(
+        max0 < max1,
+        "global normalization should preserve relative scale"
+    );
+}
+
+#[test]
+fn test_as_pipeline_time_series_anchored_uses_first_slice_as_reference() {
+    let labels = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+    let adj = Array2::from_shape_vec((3, 3), vec![0.0, 1.0, 0.2, 1.0, 0.0, 0.2, 0.2, 0.2, 0.0])
+        .expect("adj shape");
+
+    let result = run_pipeline(&AsPipelineInput {
+        datasets: vec![
+            ("T1".to_string(), adj.clone()),
+            ("T2".to_string(), adj.clone()),
+            ("T3".to_string(), adj),
+        ],
+        labels,
+        mds_config: MdsConfig::Classical,
+        procrustes_mode: ProcrustesMode::TimeSeriesAnchored,
+        mds_dims: MdsDimMode::Visual,
+        normalize: false,
+        normalization_mode: NormalizationMode::Independent,
+        target_range: 1.0,
+        procrustes_scale: false,
+    })
+    .expect("anchored time series pipeline failed");
+
+    assert_eq!(result.procrustes.len(), 3);
+    assert!(result.procrustes[0].residual.abs() < 1e-12);
+    assert!(result.procrustes[1].residual.abs() < 1e-12);
+    assert!(result.procrustes[2].residual.abs() < 1e-12);
+}
+
+#[test]
+fn test_as_pipeline_preserves_directed_edges_in_etv_output() {
+    let labels = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+    let adj = Array2::from_shape_vec((3, 3), vec![0.0, 1.0, 0.0, 0.0, 0.0, 0.5, 0.25, 0.0, 0.0])
+        .expect("adj shape");
+
+    let result = run_pipeline(&AsPipelineInput {
+        datasets: vec![("T1".to_string(), adj)],
+        labels,
+        mds_config: MdsConfig::Classical,
+        procrustes_mode: ProcrustesMode::None,
+        mds_dims: MdsDimMode::Visual,
+        normalize: false,
+        normalization_mode: NormalizationMode::Independent,
+        target_range: 1.0,
+        procrustes_scale: false,
+    })
+    .expect("directed pipeline failed");
+
+    let edges = &result.etv_dataset.sheets[0].edges;
+    assert_eq!(edges.len(), 3);
+    assert_eq!(edges[0].from, "a");
+    assert_eq!(edges[0].to, "b");
+    assert_eq!(edges[1].from, "b");
+    assert_eq!(edges[1].to, "c");
+    assert_eq!(edges[2].from, "c");
+    assert_eq!(edges[2].to, "a");
 }

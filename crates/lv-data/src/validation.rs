@@ -169,6 +169,18 @@ pub fn validate_sheet(sheet: &EtvSheet) -> Vec<ValidationFailure> {
 pub fn validate_dataset(dataset: &EtvDataset) -> Result<(), DataError> {
     let mut all_failures: Vec<ValidationFailure> = Vec::new();
 
+    let canonical_labels = dataset.canonical_all_labels();
+    if dataset.all_labels != canonical_labels {
+        all_failures.push(ValidationFailure {
+            sheet: "<dataset>".into(),
+            row: 0,
+            msg: format!(
+                "all_labels does not match the canonical first-seen union of sheet row labels; expected {:?}, got {:?}",
+                canonical_labels, dataset.all_labels
+            ),
+        });
+    }
+
     for sheet in &dataset.sheets {
         all_failures.extend(validate_sheet(sheet));
     }
@@ -369,9 +381,29 @@ mod tests {
         };
         let result = validate_dataset(&dataset);
         assert!(result.is_err());
-        // Should report 2 failures (empty label + zero size)
+        // Should report 3 failures (all_labels mismatch + empty label + zero size)
         if let Err(DataError::Validation { count, .. }) = result {
-            assert_eq!(count, 2);
+            assert_eq!(count, 3);
+        }
+    }
+
+    #[test]
+    fn dataset_validation_rejects_stale_all_labels() {
+        let dataset = EtvDataset {
+            source_path: None,
+            sheets: vec![EtvSheet {
+                name: "Sheet1".into(),
+                sheet_index: 0,
+                rows: vec![valid_row()],
+                edges: vec![],
+            }],
+            all_labels: vec!["ghost".into(), "TestNode".into()],
+        };
+
+        let result = validate_dataset(&dataset);
+        assert!(result.is_err());
+        if let Err(DataError::Validation { messages, .. }) = result {
+            assert!(messages.contains("all_labels does not match"));
         }
     }
 }
