@@ -2,6 +2,7 @@
 
 //! `lv-data` — shared data model and XLSX/JSON I/O for the Lucid Visualization Suite.
 
+pub mod bridge;
 pub mod error;
 pub mod schema;
 pub mod validation;
@@ -13,6 +14,7 @@ pub mod xlsx_reader;
 #[cfg(feature = "native-io")]
 pub mod xlsx_writer;
 
+pub use bridge::SimToDistMethod;
 pub use error::DataError;
 #[cfg(feature = "native-io")]
 pub use json_io::{read_etv_json as load_dataset_json, write_etv_json};

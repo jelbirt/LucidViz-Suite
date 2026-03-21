@@ -10,12 +10,15 @@
 use unicode_normalization::UnicodeNormalization;
 
 /// Normalize raw text for tokenization.
-pub fn normalize_text(raw: &str) -> String {
-    // Step 1: NFC normalization.
-    let nfc: String = raw.nfc().collect();
+pub fn normalize_text(raw: &str, unicode_normalize: bool) -> String {
+    let normalized = if unicode_normalize {
+        raw.nfc().collect::<String>()
+    } else {
+        raw.to_string()
+    };
 
     // Steps 2-3: Lowercase and strip non-alphanumeric non-whitespace.
-    let filtered: String = nfc
+    let filtered: String = normalized
         .chars()
         .flat_map(|c| {
             if c.is_alphanumeric() || c.is_whitespace() {
@@ -38,20 +41,27 @@ mod tests {
 
     #[test]
     fn test_normalize_case_fold() {
-        assert_eq!(normalize_text("Hello World"), "hello world");
+        assert_eq!(normalize_text("Hello World", true), "hello world");
     }
 
     #[test]
     fn test_normalize_nfc_applied() {
         // "é" as combining e + combining acute (NFD) → single char (NFC).
         let nfd = "e\u{0301}"; // e + combining acute
-        let result = normalize_text(nfd);
+        let result = normalize_text(nfd, true);
         assert_eq!(result, "\u{00e9}"); // é as single NFC codepoint
     }
 
     #[test]
+    fn test_normalize_nfc_can_be_skipped() {
+        let nfd = "e\u{0301}";
+        let result = normalize_text(nfd, false);
+        assert_eq!(result, "e");
+    }
+
+    #[test]
     fn test_normalize_punctuation_stripped() {
-        let result = normalize_text("hello, world! how's it going?");
+        let result = normalize_text("hello, world! how's it going?", true);
         // Apostrophe and punctuation stripped; extra space collapsed.
         assert!(!result.contains(','), "comma should be stripped");
         assert!(!result.contains('!'), "exclamation should be stripped");
@@ -60,7 +70,7 @@ mod tests {
 
     #[test]
     fn test_normalize_whitespace_collapse() {
-        let result = normalize_text("  hello   world  ");
+        let result = normalize_text("  hello   world  ", true);
         assert_eq!(result, "hello world");
     }
 }

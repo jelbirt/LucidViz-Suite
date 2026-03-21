@@ -1,17 +1,20 @@
 //! AlignSpace pipeline panel.
 
+use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::sync::mpsc;
 use std::thread;
 
-use as_pipeline::pipeline::run_pipeline;
+use as_pipeline::pipeline::{mf_output_to_distance_matrix, run_distance_pipeline, run_pipeline};
 use as_pipeline::types::{
-    AsPipelineInput, MdsConfig, MdsDimMode, ProcrustesMode, SmacofConfig, SmacofInit,
+    AsDistancePipelineInput, AsPipelineInput, MdsConfig, MdsDimMode, ProcrustesMode, SmacofConfig,
+    SmacofInit,
 };
-use lv_data::EtvDataset;
+use lv_data::schema::EtvDataset;
+use mf_pipeline::pipeline::mf_series_output_to_as_input;
 use ndarray::Array2;
 
-use crate::state::{AppState, PipelineEvent, PipelineJob};
+use crate::state::{AppState, AsInputSource, PipelineEvent, PipelineJob};
 
 /// Panel for configuring and launching the AlignSpace MDS pipeline.
 pub struct AsPanel {
@@ -29,8 +32,6 @@ pub struct AsPanel {
     // Output dir
     output_dir: Option<PathBuf>,
     status: String,
-    /// Set to true when user clicks "Load output into LV".
-    pub load_output: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -44,8 +45,7 @@ enum MdsAlgorithmUi {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum MdsDimModeUi {
     Maximum,
-    Visual,
-    Two,
+    Planar,
     Three,
 }
 
@@ -63,7 +63,6 @@ impl Default for AsPanel {
             smacof_seed: 42,
             output_dir: None,
             status: "Ready.".into(),
-            load_output: false,
         }
     }
 }
@@ -114,7 +113,7 @@ impl AsPanel {
             .selected_text(self.dim_mode_label())
             .show_ui(ui, |ui| {
                 ui.selectable_value(&mut self.dim_mode, MdsDimModeUi::Three, "3D");
-                ui.selectable_value(&mut self.dim_mode, MdsDimModeUi::Two, "2D (Visual)");
+                ui.selectable_value(&mut self.dim_mode, MdsDimModeUi::Planar, "2D");
                 ui.selectable_value(&mut self.dim_mode, MdsDimModeUi::Maximum, "Maximum");
             });
 
@@ -165,7 +164,13 @@ impl AsPanel {
         });
 
         // ── Run button ─────────────────────────────────────────────────────
-        let can_run = state.dataset.is_some()
+        let has_input = match state.as_input_source {
+            AsInputSource::Dataset => state.dataset.is_some(),
+            AsInputSource::MatrixForge => state.mf_output.is_some(),
+            AsInputSource::MatrixForgeSeries => state.mf_series_output.is_some(),
+        };
+
+        let can_run = has_input
             && state
                 .as_job
                 .as_ref()
@@ -176,13 +181,27 @@ impl AsPanel {
             .add_enabled(can_run, egui::Button::new("Run AlignSpace"))
             .clicked()
         {
-            let ds_clone = state.dataset.clone();
-            if let Some(ds) = ds_clone {
-                let out = self
-                    .output_dir
-                    .clone()
-                    .unwrap_or_else(|| PathBuf::from("."));
-                self.launch_job(&ds, out, state);
+            let out = self
+                .output_dir
+                .clone()
+                .unwrap_or_else(|| PathBuf::from("."));
+
+            match state.as_input_source {
+                AsInputSource::Dataset => {
+                    if let Some(ds) = state.dataset.clone() {
+                        self.launch_dataset_job(&ds, out, state);
+                    }
+                }
+                AsInputSource::MatrixForge => {
+                    if let Some(mf_output) = state.mf_output.clone() {
+                        self.launch_mf_job(&mf_output, out, state);
+                    }
+                }
+                AsInputSource::MatrixForgeSeries => {
+                    if let Some(series) = state.mf_series_output.clone() {
+                        self.launch_mf_series_job(&series, out, state);
+                    }
+                }
             }
         }
 
@@ -195,7 +214,20 @@ impl AsPanel {
                     Ok(path) => {
                         self.status = format!("Done: {}", path.display());
                         if ui.button("Load output into LV").clicked() {
-                            self.load_output = true;
+                            match load_etv_dataset(path) {
+                                Ok(dataset) => {
+                                    state.dataset = Some(dataset);
+                                    state.source_path = Some(path.clone());
+                                    state.as_input_source = AsInputSource::Dataset;
+                                    state.dataset_changed = true;
+                                    state.load_error = None;
+                                    self.status = "AlignSpace output loaded into LV.".into();
+                                }
+                                Err(e) => {
+                                    state.load_error = Some(e.clone());
+                                    self.status = format!("Error: {e}");
+                                }
+                            }
                         }
                     }
                     Err(e) => {
@@ -210,9 +242,8 @@ impl AsPanel {
     fn dim_mode_label(&self) -> &'static str {
         match self.dim_mode {
             MdsDimModeUi::Three => "3D",
-            MdsDimModeUi::Two => "2D (Visual)",
+            MdsDimModeUi::Planar => "2D",
             MdsDimModeUi::Maximum => "Maximum",
-            MdsDimModeUi::Visual => "2D (Visual)",
         }
     }
 
@@ -234,46 +265,34 @@ impl AsPanel {
         }
     }
 
-    fn launch_job(&self, ds: &EtvDataset, output_dir: PathBuf, state: &mut AppState) {
+    fn selected_dim_mode(&self) -> MdsDimMode {
+        match self.dim_mode {
+            MdsDimModeUi::Three => MdsDimMode::Fixed(3),
+            MdsDimModeUi::Planar => MdsDimMode::Visual,
+            MdsDimModeUi::Maximum => MdsDimMode::Maximum,
+        }
+    }
+
+    fn launch_dataset_job(&self, ds: &EtvDataset, output_dir: PathBuf, state: &mut AppState) {
         let (tx, rx) = mpsc::channel::<PipelineEvent>();
 
-        // Collect labels and build adjacency matrices from each sheet
-        let all_labels: Vec<String> = if let Some(first) = ds.sheets.first() {
-            first.rows.iter().map(|r| r.label.clone()).collect()
-        } else {
-            vec![]
-        };
-        let n = all_labels.len();
-
-        let datasets: Vec<(String, Array2<f64>)> = ds
-            .sheets
-            .iter()
-            .map(|sheet| {
-                let mut mat = Array2::<f64>::zeros((n, n));
-                for edge in &sheet.edges {
-                    let i = all_labels.iter().position(|l| l == &edge.from);
-                    let j = all_labels.iter().position(|l| l == &edge.to);
-                    if let (Some(i), Some(j)) = (i, j) {
-                        mat[[i, j]] = edge.strength;
-                        mat[[j, i]] = edge.strength;
-                    }
-                }
-                (sheet.name.clone(), mat)
-            })
-            .collect();
+        let all_labels = collect_dataset_labels(ds);
+        let (datasets, dropped_edges) = build_dataset_adjacencies(ds, &all_labels);
 
         let mds_config = self.build_mds_config();
-        let dim_mode = match self.dim_mode {
-            MdsDimModeUi::Three => MdsDimMode::Fixed(3),
-            MdsDimModeUi::Two => MdsDimMode::Visual,
-            MdsDimModeUi::Maximum => MdsDimMode::Maximum,
-            MdsDimModeUi::Visual => MdsDimMode::Visual,
-        };
+        let dim_mode = self.selected_dim_mode();
         let procrustes_mode = self.procrustes;
         let normalize = self.normalize;
         let target_range = self.norm_range;
 
         thread::spawn(move || {
+            if !dropped_edges.is_empty() {
+                eprintln!(
+                    "AlignSpace skipped {} edge(s) with unknown labels: {}",
+                    dropped_edges.len(),
+                    dropped_edges.join(", ")
+                );
+            }
             let _ = tx.send(PipelineEvent::Progress {
                 step: "Computing MDS…".into(),
                 pct: 0.1,
@@ -313,5 +332,316 @@ impl AsPanel {
             last_pct: 0.0,
             result: None,
         });
+    }
+
+    fn launch_mf_job(
+        &self,
+        mf_output: &mf_pipeline::types::MfOutput,
+        output_dir: PathBuf,
+        state: &mut AppState,
+    ) {
+        let (tx, rx) = mpsc::channel::<PipelineEvent>();
+
+        let output = mf_output.clone();
+        let mds_config = self.build_mds_config();
+        let dim_mode = self.selected_dim_mode();
+        let procrustes_mode = self.procrustes;
+        let normalize = self.normalize;
+        let target_range = self.norm_range;
+
+        thread::spawn(move || {
+            let _ = tx.send(PipelineEvent::Progress {
+                step: "Embedding MatrixForge output…".into(),
+                pct: 0.2,
+            });
+
+            let input = build_mf_distance_input(
+                &output,
+                mds_config,
+                procrustes_mode,
+                dim_mode,
+                normalize,
+                target_range,
+            );
+
+            match run_distance_pipeline(&input) {
+                Ok(result) => {
+                    let out_file = output_dir.join("as_result.json");
+                    match serde_json::to_string(&result.etv_dataset)
+                        .map_err(|e| e.to_string())
+                        .and_then(|json| std::fs::write(&out_file, json).map_err(|e| e.to_string()))
+                    {
+                        Ok(()) => {
+                            let _ = tx.send(PipelineEvent::Done(Ok(out_file)));
+                        }
+                        Err(e) => {
+                            let _ = tx.send(PipelineEvent::Done(Err(e)));
+                        }
+                    }
+                }
+                Err(e) => {
+                    let _ = tx.send(PipelineEvent::Done(Err(e.to_string())));
+                }
+            }
+        });
+
+        state.as_job = Some(PipelineJob {
+            receiver: rx,
+            last_step: "Starting…".into(),
+            last_pct: 0.0,
+            result: None,
+        });
+    }
+
+    fn launch_mf_series_job(
+        &self,
+        series: &mf_pipeline::types::MfSeriesOutput,
+        output_dir: PathBuf,
+        state: &mut AppState,
+    ) {
+        let (tx, rx) = mpsc::channel::<PipelineEvent>();
+
+        let output = series.clone();
+        let mds_config = self.build_mds_config();
+        let dim_mode = self.selected_dim_mode();
+        let procrustes_mode = self.procrustes;
+        let normalize = self.normalize;
+        let target_range = self.norm_range;
+
+        thread::spawn(move || {
+            let _ = tx.send(PipelineEvent::Progress {
+                step: "Embedding MatrixForge series…".into(),
+                pct: 0.2,
+            });
+
+            let input = mf_series_output_to_as_input(
+                &output,
+                mds_config,
+                procrustes_mode,
+                dim_mode,
+                normalize,
+                target_range,
+                true,
+            );
+
+            match run_distance_pipeline(&input) {
+                Ok(result) => {
+                    let out_file = output_dir.join("as_result.json");
+                    match serde_json::to_string(&result.etv_dataset)
+                        .map_err(|e| e.to_string())
+                        .and_then(|json| std::fs::write(&out_file, json).map_err(|e| e.to_string()))
+                    {
+                        Ok(()) => {
+                            let _ = tx.send(PipelineEvent::Done(Ok(out_file)));
+                        }
+                        Err(e) => {
+                            let _ = tx.send(PipelineEvent::Done(Err(e)));
+                        }
+                    }
+                }
+                Err(e) => {
+                    let _ = tx.send(PipelineEvent::Done(Err(e.to_string())));
+                }
+            }
+        });
+
+        state.as_job = Some(PipelineJob {
+            receiver: rx,
+            last_step: "Starting…".into(),
+            last_pct: 0.0,
+            result: None,
+        });
+    }
+}
+
+fn build_mf_distance_input(
+    mf_output: &mf_pipeline::types::MfOutput,
+    mds_config: MdsConfig,
+    procrustes_mode: ProcrustesMode,
+    mds_dims: MdsDimMode,
+    normalize: bool,
+    target_range: f64,
+) -> AsDistancePipelineInput {
+    let se = mf_output_to_distance_matrix(
+        mf_output.labels.clone(),
+        &mf_output.similarity_matrix,
+        mf_output.n,
+        mf_output.sim_to_dist,
+    );
+
+    AsDistancePipelineInput {
+        datasets: vec![("MatrixForge".to_string(), se)],
+        mds_config,
+        procrustes_mode,
+        mds_dims,
+        normalize,
+        target_range,
+        procrustes_scale: true,
+    }
+}
+
+fn collect_dataset_labels(ds: &EtvDataset) -> Vec<String> {
+    let mut labels = Vec::new();
+
+    for label in &ds.all_labels {
+        if !labels.contains(label) {
+            labels.push(label.clone());
+        }
+    }
+
+    for sheet in &ds.sheets {
+        for row in &sheet.rows {
+            if !labels.contains(&row.label) {
+                labels.push(row.label.clone());
+            }
+        }
+    }
+
+    labels
+}
+
+fn build_dataset_adjacencies(
+    ds: &EtvDataset,
+    all_labels: &[String],
+) -> (Vec<(String, Array2<f64>)>, Vec<String>) {
+    let n = all_labels.len();
+    let label_index: HashMap<&str, usize> = all_labels
+        .iter()
+        .enumerate()
+        .map(|(idx, label)| (label.as_str(), idx))
+        .collect();
+    let mut dropped_edges = BTreeSet::new();
+
+    let datasets = ds
+        .sheets
+        .iter()
+        .map(|sheet| {
+            let mut mat = Array2::<f64>::zeros((n, n));
+            for edge in &sheet.edges {
+                let i = label_index.get(edge.from.as_str()).copied();
+                let j = label_index.get(edge.to.as_str()).copied();
+                match (i, j) {
+                    (Some(i), Some(j)) => {
+                        mat[[i, j]] = edge.strength;
+                        mat[[j, i]] = edge.strength;
+                    }
+                    _ => {
+                        dropped_edges
+                            .insert(format!("{}:{} -> {}", sheet.name, edge.from, edge.to));
+                    }
+                }
+            }
+            (sheet.name.clone(), mat)
+        })
+        .collect();
+
+    (datasets, dropped_edges.into_iter().collect())
+}
+
+fn load_etv_dataset(path: &std::path::Path) -> Result<EtvDataset, String> {
+    let json = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    serde_json::from_str(&json).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{build_dataset_adjacencies, build_mf_distance_input, collect_dataset_labels};
+    use as_pipeline::types::CentralityReport;
+    use as_pipeline::types::{MdsConfig, MdsDimMode, ProcrustesMode};
+    use lv_data::schema::{EdgeRow, EtvDataset, EtvRow, EtvSheet};
+    use mf_pipeline::types::{MfOutput, SimToDistMethod};
+
+    #[test]
+    fn collect_dataset_labels_uses_union_across_dataset() {
+        let dataset = EtvDataset {
+            source_path: None,
+            sheets: vec![
+                EtvSheet {
+                    name: "T1".into(),
+                    sheet_index: 0,
+                    rows: vec![EtvRow {
+                        label: "alpha".into(),
+                        ..Default::default()
+                    }],
+                    edges: vec![],
+                },
+                EtvSheet {
+                    name: "T2".into(),
+                    sheet_index: 1,
+                    rows: vec![EtvRow {
+                        label: "beta".into(),
+                        ..Default::default()
+                    }],
+                    edges: vec![],
+                },
+            ],
+            all_labels: vec!["alpha".into()],
+        };
+
+        assert_eq!(
+            collect_dataset_labels(&dataset),
+            vec!["alpha".to_string(), "beta".to_string()]
+        );
+    }
+
+    #[test]
+    fn build_dataset_adjacencies_reports_unknown_edge_labels() {
+        let dataset = EtvDataset {
+            source_path: None,
+            sheets: vec![EtvSheet {
+                name: "T1".into(),
+                sheet_index: 0,
+                rows: vec![EtvRow {
+                    label: "alpha".into(),
+                    ..Default::default()
+                }],
+                edges: vec![EdgeRow {
+                    from: "alpha".into(),
+                    to: "missing".into(),
+                    strength: 1.0,
+                }],
+            }],
+            all_labels: vec!["alpha".into()],
+        };
+
+        let (datasets, dropped) = build_dataset_adjacencies(&dataset, &["alpha".into()]);
+
+        assert_eq!(datasets.len(), 1);
+        assert_eq!(dropped, vec!["T1:alpha -> missing"]);
+    }
+
+    #[test]
+    fn build_mf_distance_input_creates_single_matrixforge_dataset() {
+        let mf_output = MfOutput {
+            labels: vec!["alpha".into(), "beta".into()],
+            similarity_matrix: vec![1.0, 0.25, 0.25, 1.0],
+            sim_to_dist: SimToDistMethod::Linear,
+            nppmi_matrix: vec![1.0, 0.25, 0.25, 1.0],
+            raw_counts: vec![0; 4],
+            ppmi_matrix: vec![0.0; 4],
+            n: 2,
+            centrality: CentralityReport {
+                labels: vec!["alpha".into(), "beta".into()],
+                degree: vec![0.0; 2],
+                distance: vec![0.0; 2],
+                closeness: vec![0.0; 2],
+                betweenness: vec![0.0; 2],
+            },
+        };
+
+        let input = build_mf_distance_input(
+            &mf_output,
+            MdsConfig::Classical,
+            ProcrustesMode::None,
+            MdsDimMode::Fixed(3),
+            true,
+            300.0,
+        );
+
+        assert_eq!(input.datasets.len(), 1);
+        assert_eq!(input.datasets[0].0, "MatrixForge");
+        assert_eq!(input.datasets[0].1.labels, mf_output.labels);
+        assert_eq!(input.mds_dims, MdsDimMode::Fixed(3));
+        assert!(input.normalize);
     }
 }

@@ -6,12 +6,16 @@ pub mod smacof;
 
 use anyhow::Result;
 
-use crate::types::{MdsConfig, MdsCoordinates, MdsDimMode, SeMatrix};
+use crate::types::{DistanceMatrix, MdsConfig, MdsCoordinates, MdsDimMode};
 
 /// Run MDS on a distance matrix, selecting the algorithm from `cfg`.
 ///
 /// `MdsConfig::Auto` selects Classical MDS for n<500, PivotMds otherwise.
-pub fn run_mds(dist: &SeMatrix, cfg: &MdsConfig, dim_mode: MdsDimMode) -> Result<MdsCoordinates> {
+pub fn run_mds(
+    dist: &DistanceMatrix,
+    cfg: &MdsConfig,
+    dim_mode: MdsDimMode,
+) -> Result<MdsCoordinates> {
     let n = dist.n;
     let dims = resolve_dims(dim_mode, n);
 
@@ -32,6 +36,7 @@ pub fn run_mds(dist: &SeMatrix, cfg: &MdsConfig, dim_mode: MdsDimMode) -> Result
 
 fn resolve_dims(mode: MdsDimMode, n: usize) -> usize {
     match mode {
+        // `Visual` is the legacy API name for the 2D planar layout mode.
         MdsDimMode::Visual => 2,
         MdsDimMode::Fixed(d) => d.min(n - 1),
         MdsDimMode::Maximum => (n - 1).max(1),

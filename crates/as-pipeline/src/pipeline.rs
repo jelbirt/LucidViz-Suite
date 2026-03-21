@@ -4,6 +4,7 @@ use anyhow::{bail, Result};
 use ndarray::Array2;
 
 use lv_data::schema::EtvDataset;
+use lv_data::SimToDistMethod;
 
 use crate::centrality::compute_centrality;
 use crate::mds::run_mds;
@@ -11,8 +12,8 @@ use crate::normalize::normalize_coordinates;
 use crate::procrustes::procrustes;
 use crate::structural_eq::compute_se_matrix;
 use crate::types::{
-    AsPipelineInput, AsPipelineResult, CentralityReport, MdsCoordinates, ProcrustesMode,
-    ProcrustesResult, SeMatrix,
+    AsDistancePipelineInput, AsPipelineInput, AsPipelineResult, CentralityState, DistanceMatrix,
+    MdsCoordinates, ProcrustesMode, ProcrustesResult,
 };
 
 /// Run the full AlignSpace pipeline.
@@ -30,14 +31,14 @@ pub fn run_pipeline(input: &AsPipelineInput) -> Result<AsPipelineResult> {
         bail!("AsPipelineInput has no datasets");
     }
 
-    let mut se_matrices: Vec<SeMatrix> = Vec::new();
+    let mut distance_matrices: Vec<DistanceMatrix> = Vec::new();
     let mut raw_coords: Vec<MdsCoordinates> = Vec::new();
-    let mut centralities: Vec<CentralityReport> = Vec::new();
+    let mut centralities: Vec<CentralityState> = Vec::new();
 
     for (name, adj) in &input.datasets {
         // Compute SE matrix.
         let se = compute_se_matrix(adj, input.labels.clone());
-        se_matrices.push(se.clone());
+        distance_matrices.push(se.clone());
 
         // Run MDS.
         let coords = run_mds(&se, &input.mds_config, input.mds_dims)?;
@@ -45,69 +46,13 @@ pub fn run_pipeline(input: &AsPipelineInput) -> Result<AsPipelineResult> {
 
         // Compute centrality.
         let centrality = compute_centrality(adj, &input.labels);
-        centralities.push(centrality);
+        centralities.push(CentralityState::Computed(centrality));
 
         let _ = name; // used for future output naming
     }
 
-    // Procrustes alignment.
-    let procrustes_results: Vec<ProcrustesResult> = match input.procrustes_mode {
-        ProcrustesMode::None => {
-            // No alignment — create identity procrustes results.
-            raw_coords
-                .iter()
-                .map(|c| ProcrustesResult {
-                    aligned: c.clone(),
-                    rotation: identity_rotation(c.dims),
-                    scale: 1.0,
-                    translation: vec![0.0; c.dims],
-                    residual: 0.0,
-                })
-                .collect()
-        }
-        ProcrustesMode::TimeSeries => {
-            let mut aligned_coords: Vec<MdsCoordinates> = raw_coords.clone();
-            let mut proc_results: Vec<ProcrustesResult> = Vec::new();
-
-            // First step: identity.
-            proc_results.push(ProcrustesResult {
-                aligned: aligned_coords[0].clone(),
-                rotation: identity_rotation(aligned_coords[0].dims),
-                scale: 1.0,
-                translation: vec![0.0; aligned_coords[0].dims],
-                residual: 0.0,
-            });
-
-            // Align each subsequent step to the previous.
-            for (i, source) in raw_coords.iter().enumerate().skip(1) {
-                let target = aligned_coords[i - 1].clone();
-                let res = procrustes(source, &target, input.procrustes_scale)?;
-                aligned_coords[i] = res.aligned.clone();
-                proc_results.push(res);
-            }
-            proc_results
-        }
-        ProcrustesMode::OptimalChoice => {
-            // Find the pair with the best (lowest) alignment residual and use that
-            // as the reference; for now fall back to step 0 as reference.
-            // Full optimal implementation would try all pairs; this is a simplification.
-            let reference = raw_coords[0].clone();
-            let mut proc_results: Vec<ProcrustesResult> = Vec::new();
-            proc_results.push(ProcrustesResult {
-                aligned: reference.clone(),
-                rotation: identity_rotation(reference.dims),
-                scale: 1.0,
-                translation: vec![0.0; reference.dims],
-                residual: 0.0,
-            });
-            for (idx, source) in raw_coords.iter().enumerate().skip(1) {
-                let res = procrustes(source, &reference, input.procrustes_scale)?;
-                let _ = idx;
-                proc_results.push(res);
-            }
-            proc_results
-        }
-    };
+    let procrustes_results =
+        align_coordinates(&raw_coords, input.procrustes_mode, input.procrustes_scale)?;
 
     // Extract final aligned coordinates.
     let mut coordinates: Vec<MdsCoordinates> = procrustes_results
@@ -129,7 +74,59 @@ pub fn run_pipeline(input: &AsPipelineInput) -> Result<AsPipelineResult> {
         coordinates,
         procrustes: procrustes_results,
         centralities,
-        se_matrices,
+        distance_matrices,
+        etv_dataset,
+    })
+}
+
+/// Run AlignSpace from precomputed distance matrices instead of adjacency inputs.
+pub fn run_distance_pipeline(input: &AsDistancePipelineInput) -> Result<AsPipelineResult> {
+    if input.datasets.is_empty() {
+        bail!("AsDistancePipelineInput has no datasets");
+    }
+
+    let distance_matrices: Vec<DistanceMatrix> =
+        input.datasets.iter().map(|(_, se)| se.clone()).collect();
+    let raw_coords: Vec<MdsCoordinates> = distance_matrices
+        .iter()
+        .map(|se| run_mds(se, &input.mds_config, input.mds_dims))
+        .collect::<Result<_>>()?;
+
+    let labels = distance_matrices
+        .first()
+        .map(|se| se.labels.clone())
+        .unwrap_or_default();
+    let centralities: Vec<CentralityState> = distance_matrices
+        .iter()
+        .map(|_| unavailable_centrality_state(&labels))
+        .collect();
+
+    let procrustes_results =
+        align_coordinates(&raw_coords, input.procrustes_mode, input.procrustes_scale)?;
+
+    let mut coordinates: Vec<MdsCoordinates> = procrustes_results
+        .iter()
+        .map(|r| r.aligned.clone())
+        .collect();
+
+    if input.normalize {
+        for coords in coordinates.iter_mut() {
+            normalize_coordinates(coords, input.target_range);
+        }
+    }
+
+    let dataset_names: Vec<(String, Array2<f64>)> = input
+        .datasets
+        .iter()
+        .map(|(name, se)| (name.clone(), Array2::<f64>::zeros((se.n, se.n))))
+        .collect();
+    let etv_dataset = build_etv_dataset(&coordinates, &dataset_names);
+
+    Ok(AsPipelineResult {
+        coordinates,
+        procrustes: procrustes_results,
+        centralities,
+        distance_matrices,
         etv_dataset,
     })
 }
@@ -138,32 +135,31 @@ pub fn run_pipeline(input: &AsPipelineInput) -> Result<AsPipelineResult> {
 // MF → AS bridge
 // ---------------------------------------------------------------------------
 
-/// Similarity-to-distance conversion methods (mirrors MfConfig).
-#[derive(Debug, Clone, Copy)]
-pub enum SimToDistMethod {
-    /// d = 1 - s
-    Linear,
-    /// d = sqrt(1 - s²)
-    Cosine,
-    /// d = -ln(s)  (s must be > 0)
-    Info,
-}
-
-/// Convert an MF output similarity matrix into an AS-compatible SeMatrix.
+/// Convert an MF output similarity matrix into an AS-compatible distance matrix.
 ///
 /// `sim[i,j]` values are assumed in [0, 1].
-pub fn mf_output_to_se_matrix(
+pub fn mf_output_to_distance_matrix(
     labels: Vec<String>,
     similarity_matrix: &[f64],
     n: usize,
     method: SimToDistMethod,
-) -> SeMatrix {
+) -> DistanceMatrix {
     assert_eq!(similarity_matrix.len(), n * n);
     let data: Vec<f64> = similarity_matrix
         .iter()
         .map(|&s| sim_to_dist(s, method))
         .collect();
-    SeMatrix::new(labels, data)
+    DistanceMatrix::new(labels, data)
+}
+
+/// Legacy bridge name retained for compatibility.
+pub fn mf_output_to_se_matrix(
+    labels: Vec<String>,
+    similarity_matrix: &[f64],
+    n: usize,
+    method: SimToDistMethod,
+) -> DistanceMatrix {
+    mf_output_to_distance_matrix(labels, similarity_matrix, n, method)
 }
 
 fn sim_to_dist(s: f64, method: SimToDistMethod) -> f64 {
@@ -192,6 +188,116 @@ fn identity_rotation(dims: usize) -> Vec<f64> {
     r
 }
 
+fn unavailable_centrality_state(labels: &[String]) -> CentralityState {
+    CentralityState::Unavailable {
+        labels: labels.to_vec(),
+        reason:
+            "Centrality is unavailable for precomputed distance inputs without an adjacency graph"
+                .to_string(),
+    }
+}
+
+fn align_coordinates(
+    raw_coords: &[MdsCoordinates],
+    procrustes_mode: ProcrustesMode,
+    procrustes_scale: bool,
+) -> Result<Vec<ProcrustesResult>> {
+    let results = match procrustes_mode {
+        ProcrustesMode::None => raw_coords
+            .iter()
+            .map(|c| ProcrustesResult {
+                aligned: c.clone(),
+                rotation: identity_rotation(c.dims),
+                scale: 1.0,
+                translation: vec![0.0; c.dims],
+                residual: 0.0,
+            })
+            .collect(),
+        ProcrustesMode::TimeSeries => {
+            let mut aligned_coords: Vec<MdsCoordinates> = raw_coords.to_vec();
+            let mut proc_results: Vec<ProcrustesResult> = Vec::new();
+
+            proc_results.push(ProcrustesResult {
+                aligned: aligned_coords[0].clone(),
+                rotation: identity_rotation(aligned_coords[0].dims),
+                scale: 1.0,
+                translation: vec![0.0; aligned_coords[0].dims],
+                residual: 0.0,
+            });
+
+            for (i, source) in raw_coords.iter().enumerate().skip(1) {
+                let target = aligned_coords[i - 1].clone();
+                let res = procrustes(source, &target, procrustes_scale)?;
+                aligned_coords[i] = res.aligned.clone();
+                proc_results.push(res);
+            }
+            proc_results
+        }
+        ProcrustesMode::OptimalChoice => {
+            let reference_idx = choose_optimal_reference(raw_coords, procrustes_scale)?;
+            let reference = raw_coords[reference_idx].clone();
+            let mut proc_results: Vec<ProcrustesResult> = Vec::new();
+            for (idx, source) in raw_coords.iter().enumerate() {
+                if idx == reference_idx {
+                    proc_results.push(ProcrustesResult {
+                        aligned: reference.clone(),
+                        rotation: identity_rotation(reference.dims),
+                        scale: 1.0,
+                        translation: vec![0.0; reference.dims],
+                        residual: 0.0,
+                    });
+                } else {
+                    proc_results.push(procrustes(source, &reference, procrustes_scale)?);
+                }
+            }
+            proc_results
+        }
+    };
+
+    Ok(results)
+}
+
+fn choose_optimal_reference(
+    raw_coords: &[MdsCoordinates],
+    procrustes_scale: bool,
+) -> Result<usize> {
+    let mut best: Option<(usize, f64)> = None;
+
+    for (candidate_idx, candidate) in raw_coords.iter().enumerate() {
+        let mut total_residual = 0.0;
+        let mut valid = true;
+
+        for (other_idx, other) in raw_coords.iter().enumerate() {
+            if candidate_idx == other_idx {
+                continue;
+            }
+
+            match procrustes(other, candidate, procrustes_scale) {
+                Ok(result) => {
+                    total_residual += result.residual;
+                }
+                Err(_) => {
+                    valid = false;
+                    break;
+                }
+            }
+        }
+
+        if valid {
+            match best {
+                Some((_, best_residual)) if total_residual >= best_residual => {}
+                _ => best = Some((candidate_idx, total_residual)),
+            }
+        }
+    }
+
+    if let Some((idx, _)) = best {
+        Ok(idx)
+    } else {
+        bail!("OptimalChoice could not find a reference sharing enough labels with all time steps")
+    }
+}
+
 fn build_etv_dataset(
     coordinates: &[MdsCoordinates],
     datasets: &[(String, Array2<f64>)],
@@ -206,7 +312,10 @@ fn build_etv_dataset(
         };
     }
 
-    // Create one sheet per time step.
+    // Create one sheet per time step. For adjacency-backed inputs, preserve
+    // one undirected edge per connected pair by taking the maximum weight from
+    // the upper/lower triangle. Distance-backed inputs pass zero-adjacency
+    // placeholders, so they export coordinate-only sheets with no edges.
     let sheets: Vec<EtvSheet> = coordinates
         .iter()
         .enumerate()
@@ -231,34 +340,144 @@ fn build_etv_dataset(
                     } else {
                         0.0
                     };
+                    let z = if coords.dims >= 3 {
+                        coords.data[i * coords.dims + 2]
+                    } else {
+                        0.0
+                    };
                     EtvRow {
                         label: label.clone(),
                         shape: ShapeKind::Sphere,
                         x,
                         y,
+                        z,
                         ..Default::default()
                     }
                 })
                 .collect();
 
+            let edges = datasets
+                .get(step_idx)
+                .map(|(_, adj)| adjacency_to_edges(&coords.labels, adj))
+                .unwrap_or_default();
+
             EtvSheet {
                 name,
                 sheet_index: step_idx,
                 rows,
-                edges: vec![],
+                edges,
             }
         })
         .collect();
 
-    let all_labels = if let Some(first) = coordinates.first() {
-        first.labels.clone()
-    } else {
-        vec![]
-    };
+    let mut all_labels = Vec::new();
+    for coords in coordinates {
+        for label in &coords.labels {
+            if !all_labels.contains(label) {
+                all_labels.push(label.clone());
+            }
+        }
+    }
 
     EtvDataset {
         source_path: None,
         sheets,
         all_labels,
+    }
+}
+
+fn adjacency_to_edges(labels: &[String], adj: &Array2<f64>) -> Vec<lv_data::schema::EdgeRow> {
+    let n = labels.len().min(adj.nrows()).min(adj.ncols());
+    let mut edges = Vec::new();
+
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let strength = adj[[i, j]].max(adj[[j, i]]);
+            if strength != 0.0 {
+                edges.push(lv_data::schema::EdgeRow {
+                    from: labels[i].clone(),
+                    to: labels[j].clone(),
+                    strength,
+                });
+            }
+        }
+    }
+
+    edges
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{align_coordinates, build_etv_dataset, unavailable_centrality_state};
+    use crate::types::{CentralityState, MdsAlgorithm, MdsCoordinates, ProcrustesMode};
+    use ndarray::array;
+
+    #[test]
+    fn build_etv_dataset_preserves_z_and_adjacency_edges() {
+        let coords = MdsCoordinates::new(
+            vec!["alpha".into(), "beta".into()],
+            vec![1.0, 2.0, 3.0, -1.0, -2.0, -3.0],
+            3,
+            0.0,
+            MdsAlgorithm::Classical,
+        );
+        let datasets = vec![("T1".to_string(), array![[0.0, 0.75], [0.75, 0.0]])];
+
+        let etv = build_etv_dataset(&[coords], &datasets);
+
+        assert_eq!(etv.sheets.len(), 1);
+        assert_eq!(etv.sheets[0].rows[0].z, 3.0);
+        assert_eq!(etv.sheets[0].rows[1].z, -3.0);
+        assert_eq!(etv.sheets[0].edges.len(), 1);
+        assert_eq!(etv.sheets[0].edges[0].from, "alpha");
+        assert_eq!(etv.sheets[0].edges[0].to, "beta");
+        assert!((etv.sheets[0].edges[0].strength - 0.75).abs() < 1e-12);
+    }
+
+    #[test]
+    fn optimal_choice_uses_lowest_total_residual_reference() {
+        let coords = vec![
+            MdsCoordinates::new(
+                vec!["a".into(), "b".into(), "c".into()],
+                vec![0.0, 0.0, 1.0, 0.0, 0.1, 0.9],
+                2,
+                0.0,
+                MdsAlgorithm::Classical,
+            ),
+            MdsCoordinates::new(
+                vec!["a".into(), "b".into(), "c".into()],
+                vec![0.0, 0.0, 1.0, 0.0, 0.5, 0.8],
+                2,
+                0.0,
+                MdsAlgorithm::Classical,
+            ),
+            MdsCoordinates::new(
+                vec!["a".into(), "b".into(), "c".into()],
+                vec![0.0, 0.0, 1.0, 0.0, 0.9, 0.6],
+                2,
+                0.0,
+                MdsAlgorithm::Classical,
+            ),
+        ];
+
+        let results = align_coordinates(&coords, ProcrustesMode::OptimalChoice, false)
+            .expect("optimal choice should align");
+
+        assert_eq!(results[1].residual, 0.0);
+        assert!(results[0].residual > 0.0);
+        assert!(results[2].residual > 0.0);
+    }
+
+    #[test]
+    fn unavailable_centrality_state_is_explicit() {
+        let state = unavailable_centrality_state(&["a".to_string(), "b".to_string()]);
+
+        match state {
+            CentralityState::Unavailable { labels, reason } => {
+                assert_eq!(labels, vec!["a", "b"]);
+                assert!(reason.contains("precomputed distance"));
+            }
+            CentralityState::Computed(_) => panic!("expected unavailable state"),
+        }
     }
 }

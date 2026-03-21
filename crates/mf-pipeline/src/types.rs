@@ -1,7 +1,9 @@
 //! Core types for the MatrixForge pipeline.
 
 use as_pipeline::types::CentralityReport;
+pub use lv_data::SimToDistMethod;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 // ---------------------------------------------------------------------------
 // Token
@@ -90,6 +92,14 @@ pub struct MfConfig {
     pub unicode_normalize: bool,
     /// Similarity-to-distance conversion method for the AS bridge.
     pub sim_to_dist: SimToDistMethod,
+    /// Temporal slicing mode for series output.
+    pub slice_mode: MfSliceMode,
+    /// Number of tokens per batch when `slice_mode` is `FixedTokenBatch`.
+    pub slice_size: usize,
+    /// Drop slices smaller than this many post-filtered tokens.
+    pub min_tokens_per_slice: usize,
+    /// Reuse one global vocabulary across all slices.
+    pub shared_vocabulary: bool,
 }
 
 impl Default for MfConfig {
@@ -103,19 +113,20 @@ impl Default for MfConfig {
             language: "en".to_string(),
             unicode_normalize: true,
             sim_to_dist: SimToDistMethod::Linear,
+            slice_mode: MfSliceMode::None,
+            slice_size: 500,
+            min_tokens_per_slice: 1,
+            shared_vocabulary: true,
         }
     }
 }
 
-/// How to convert NPPMI similarity values to distances for the AS bridge.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SimToDistMethod {
-    /// d = 1 - s
-    Linear,
-    /// d = sqrt(1 - s²)
-    Cosine,
-    /// d = -ln(s)
-    Info,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum MfSliceMode {
+    #[default]
+    None,
+    PerFile,
+    FixedTokenBatch,
 }
 
 // ---------------------------------------------------------------------------
@@ -127,14 +138,37 @@ pub enum SimToDistMethod {
 pub struct MfOutput {
     /// Vocabulary (sorted alphabetically, after filtering).
     pub labels: Vec<String>,
-    /// NPPMI similarity matrix (n×n, row-major, values in [0, 1]).
+    /// Runtime-selected similarity matrix (n×n, row-major, values in [0, 1]).
     pub similarity_matrix: Vec<f64>,
+    /// Similarity-to-distance conversion selected for downstream AlignSpace use.
+    pub sim_to_dist: SimToDistMethod,
+    /// NPPMI matrix (n×n, row-major, values in [0, 1]).
+    pub nppmi_matrix: Vec<f64>,
     /// Raw co-occurrence count matrix (n×n).
     pub raw_counts: Vec<u64>,
     /// PPMI matrix (n×n, before normalisation).
     pub ppmi_matrix: Vec<f64>,
     pub n: usize,
     pub centrality: CentralityReport,
+}
+
+/// One slice in a temporal/comparative MatrixForge series.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MfSlice {
+    pub id: String,
+    pub label: String,
+    pub order: usize,
+    pub source_paths: Vec<PathBuf>,
+    pub token_count: usize,
+    pub output: MfOutput,
+}
+
+/// Ordered MatrixForge series output suitable for downstream AlignSpace use.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MfSeriesOutput {
+    pub labels: Vec<String>,
+    pub sim_to_dist: SimToDistMethod,
+    pub slices: Vec<MfSlice>,
 }
 
 // ---------------------------------------------------------------------------

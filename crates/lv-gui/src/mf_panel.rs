@@ -3,11 +3,14 @@
 use std::path::PathBuf;
 use std::sync::mpsc;
 use std::thread;
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use mf_pipeline::pipeline::run_mf_pipeline;
-use mf_pipeline::types::{MfConfig, MfPipelineConfig, SimToDistMethod};
+use mf_pipeline::pipeline::{run_mf_pipeline, run_mf_series_pipeline};
+use mf_pipeline::types::{
+    MfConfig, MfOutput, MfPipelineConfig, MfSeriesOutput, MfSliceMode, SimToDistMethod,
+};
 
-use crate::state::{AppState, PipelineEvent, PipelineJob};
+use crate::state::{AppState, AsInputSource, PipelineEvent, PipelineJob};
 
 /// Panel for configuring and launching the MatrixForge text-analysis pipeline.
 pub struct MfPanel {
@@ -20,9 +23,12 @@ pub struct MfPanel {
     min_count: u64,
     min_pmi: f64,
     sim_to_dist: SimToDistMethodUi,
+    slice_mode: MfSliceModeUi,
+    slice_size: usize,
+    unicode_normalize: bool,
+    shared_vocabulary: bool,
+    min_tokens_per_slice: usize,
     output_dir: Option<PathBuf>,
-    /// Set to true when user clicks "Send output to AlignSpace".
-    pub send_to_as: bool,
     status: String,
 }
 
@@ -33,20 +39,32 @@ enum SimToDistMethodUi {
     Info,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MfSliceModeUi {
+    None,
+    PerFile,
+    FixedTokenBatch,
+}
+
 impl Default for MfPanel {
     fn default() -> Self {
+        let defaults = MfConfig::default();
         Self {
             input_files: vec![],
             input_dir: None,
-            window_size: 5,
-            slide_rate: 1,
-            language: "en".into(),
-            use_pmi: true,
-            min_count: 2,
-            min_pmi: 0.0,
-            sim_to_dist: SimToDistMethodUi::Linear,
+            window_size: defaults.window_size,
+            slide_rate: defaults.slide_rate,
+            language: defaults.language,
+            use_pmi: defaults.use_pmi,
+            min_count: defaults.min_count,
+            min_pmi: defaults.min_pmi,
+            sim_to_dist: SimToDistMethodUi::from(defaults.sim_to_dist),
+            slice_mode: MfSliceModeUi::from(defaults.slice_mode),
+            slice_size: defaults.slice_size,
+            unicode_normalize: defaults.unicode_normalize,
+            shared_vocabulary: defaults.shared_vocabulary,
+            min_tokens_per_slice: defaults.min_tokens_per_slice,
             output_dir: None,
-            send_to_as: false,
             status: "Ready.".into(),
         }
     }
@@ -67,7 +85,7 @@ impl MfPanel {
                     self.input_files.extend(files);
                 }
             }
-            if ui.button("Add directory…").clicked() {
+            if ui.button("Add .txt directory…").clicked() {
                 if let Some(dir) = rfd::FileDialog::new().pick_folder() {
                     self.input_dir = Some(dir);
                 }
@@ -80,6 +98,9 @@ impl MfPanel {
 
         let total = self.input_files.len() + self.input_dir.as_ref().map(|_| 1).unwrap_or(0);
         ui.label(format!("{total} source(s) selected"));
+        ui.small(
+            "Directory ingestion is non-recursive and currently loads only top-level .txt files. Add .csv/.md inputs individually.",
+        );
 
         ui.separator();
 
@@ -110,6 +131,45 @@ impl MfPanel {
             );
         });
         ui.checkbox(&mut self.use_pmi, "Use PMI (vs raw counts)");
+
+        egui::CollapsingHeader::new("Advanced options")
+            .default_open(false)
+            .show(ui, |ui| {
+                ui.checkbox(&mut self.unicode_normalize, "Unicode normalize (NFC)");
+                ui.checkbox(
+                    &mut self.shared_vocabulary,
+                    "Shared vocabulary across slices",
+                );
+                ui.horizontal(|ui| {
+                    ui.label("Min tokens per slice:");
+                    ui.add(
+                        egui::DragValue::new(&mut self.min_tokens_per_slice).range(1..=1_000_000),
+                    );
+                });
+            });
+
+        egui::ComboBox::from_label("Slice mode")
+            .selected_text(match self.slice_mode {
+                MfSliceModeUi::None => "Single matrix",
+                MfSliceModeUi::PerFile => "Per file",
+                MfSliceModeUi::FixedTokenBatch => "Fixed token batch",
+            })
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut self.slice_mode, MfSliceModeUi::None, "Single matrix");
+                ui.selectable_value(&mut self.slice_mode, MfSliceModeUi::PerFile, "Per file");
+                ui.selectable_value(
+                    &mut self.slice_mode,
+                    MfSliceModeUi::FixedTokenBatch,
+                    "Fixed token batch",
+                );
+            });
+
+        if self.slice_mode == MfSliceModeUi::FixedTokenBatch {
+            ui.horizontal(|ui| {
+                ui.label("Batch size:");
+                ui.add(egui::DragValue::new(&mut self.slice_size).range(10..=100_000));
+            });
+        }
 
         egui::ComboBox::from_label("Sim→Dist")
             .selected_text(format!("{:?}", self.sim_to_dist))
@@ -160,7 +220,36 @@ impl MfPanel {
                     Ok(path) => {
                         self.status = format!("Done: {}", path.display());
                         if ui.button("Send output to AlignSpace").clicked() {
-                            self.send_to_as = true;
+                            match self.slice_mode {
+                                MfSliceModeUi::None => match load_mf_output(path) {
+                                    Ok(output) => {
+                                        state.mf_output = Some(output);
+                                        state.mf_series_output = None;
+                                        state.as_input_source = AsInputSource::MatrixForge;
+                                        state.load_error = None;
+                                        self.status =
+                                            "MatrixForge output is ready in AlignSpace.".into();
+                                    }
+                                    Err(e) => {
+                                        state.load_error = Some(e.clone());
+                                        self.status = format!("Error: {e}");
+                                    }
+                                },
+                                _ => match load_mf_series_output(path) {
+                                    Ok(output) => {
+                                        state.mf_series_output = Some(output);
+                                        state.mf_output = None;
+                                        state.as_input_source = AsInputSource::MatrixForgeSeries;
+                                        state.load_error = None;
+                                        self.status =
+                                            "MatrixForge series is ready in AlignSpace.".into();
+                                    }
+                                    Err(e) => {
+                                        state.load_error = Some(e.clone());
+                                        self.status = format!("Error: {e}");
+                                    }
+                                },
+                            }
                         }
                     }
                     Err(e) => {
@@ -177,34 +266,17 @@ impl MfPanel {
 
         let mut sources: Vec<PathBuf> = self.input_files.clone();
         if let Some(ref dir) = self.input_dir {
-            if let Ok(entries) = std::fs::read_dir(dir) {
-                for entry in entries.flatten() {
-                    let p = entry.path();
-                    if p.is_file() {
-                        sources.push(p);
-                    }
-                }
-            }
+            sources.push(dir.clone());
         }
-        let output_dir = self.output_dir.clone();
+        let output_dir = self
+            .output_dir
+            .clone()
+            .unwrap_or_else(default_mf_output_dir);
 
-        let mf_config = MfConfig {
-            window_size: self.window_size,
-            slide_rate: self.slide_rate,
-            language: self.language.clone(),
-            use_pmi: self.use_pmi,
-            min_count: self.min_count,
-            min_pmi: self.min_pmi,
-            unicode_normalize: true,
-            sim_to_dist: match self.sim_to_dist {
-                SimToDistMethodUi::Linear => SimToDistMethod::Linear,
-                SimToDistMethodUi::Cosine => SimToDistMethod::Cosine,
-                SimToDistMethodUi::Info => SimToDistMethod::Info,
-            },
-        };
+        let mf_config = self.build_mf_config();
         let pipeline_cfg = MfPipelineConfig {
             input_paths: sources,
-            output_dir: output_dir.clone(),
+            output_dir: Some(output_dir.clone()),
             mf_config,
             write_json: true,
             write_xlsx: false,
@@ -215,16 +287,23 @@ impl MfPanel {
                 step: "Running MatrixForge…".into(),
                 pct: 0.2,
             });
-            match run_mf_pipeline(&pipeline_cfg) {
+            let is_series = pipeline_cfg.mf_config.slice_mode != MfSliceMode::None;
+            let result = if is_series {
+                run_mf_series_pipeline(&pipeline_cfg).map(|_| ())
+            } else {
+                run_mf_pipeline(&pipeline_cfg).map(|_| ())
+            };
+            match result {
                 Ok(_output) => {
                     let _ = tx.send(PipelineEvent::Progress {
                         step: "Done.".into(),
                         pct: 1.0,
                     });
-                    // Report the output directory as the result path
-                    let out_path = output_dir
-                        .unwrap_or_else(|| PathBuf::from("."))
-                        .join("mf_output.json");
+                    let out_path = if is_series {
+                        output_dir.join("mf_series_output.json")
+                    } else {
+                        output_dir.join("mf_output.json")
+                    };
                     let _ = tx.send(PipelineEvent::Done(Ok(out_path)));
                 }
                 Err(e) => {
@@ -239,5 +318,97 @@ impl MfPanel {
             last_pct: 0.0,
             result: None,
         });
+    }
+
+    fn build_mf_config(&self) -> MfConfig {
+        MfConfig {
+            window_size: self.window_size,
+            slide_rate: self.slide_rate,
+            language: self.language.clone(),
+            use_pmi: self.use_pmi,
+            min_count: self.min_count,
+            min_pmi: self.min_pmi,
+            unicode_normalize: self.unicode_normalize,
+            sim_to_dist: match self.sim_to_dist {
+                SimToDistMethodUi::Linear => SimToDistMethod::Linear,
+                SimToDistMethodUi::Cosine => SimToDistMethod::Cosine,
+                SimToDistMethodUi::Info => SimToDistMethod::Info,
+            },
+            slice_mode: match self.slice_mode {
+                MfSliceModeUi::None => MfSliceMode::None,
+                MfSliceModeUi::PerFile => MfSliceMode::PerFile,
+                MfSliceModeUi::FixedTokenBatch => MfSliceMode::FixedTokenBatch,
+            },
+            slice_size: self.slice_size,
+            min_tokens_per_slice: self.min_tokens_per_slice,
+            shared_vocabulary: self.shared_vocabulary,
+        }
+    }
+}
+
+impl From<SimToDistMethod> for SimToDistMethodUi {
+    fn from(value: SimToDistMethod) -> Self {
+        match value {
+            SimToDistMethod::Linear => Self::Linear,
+            SimToDistMethod::Cosine => Self::Cosine,
+            SimToDistMethod::Info => Self::Info,
+        }
+    }
+}
+
+impl From<MfSliceMode> for MfSliceModeUi {
+    fn from(value: MfSliceMode) -> Self {
+        match value {
+            MfSliceMode::None => Self::None,
+            MfSliceMode::PerFile => Self::PerFile,
+            MfSliceMode::FixedTokenBatch => Self::FixedTokenBatch,
+        }
+    }
+}
+
+fn default_mf_output_dir() -> PathBuf {
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    std::env::temp_dir()
+        .join("lucid-viz")
+        .join("matrixforge")
+        .join(stamp.to_string())
+}
+
+fn load_mf_output(path: &std::path::Path) -> Result<MfOutput, String> {
+    let json = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    serde_json::from_str(&json).map_err(|e| e.to_string())
+}
+
+fn load_mf_series_output(path: &std::path::Path) -> Result<MfSeriesOutput, String> {
+    let json = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    serde_json::from_str(&json).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MfPanel;
+    use mf_pipeline::types::MfConfig;
+
+    #[test]
+    fn default_panel_matches_mf_defaults() {
+        let panel = MfPanel::default();
+        let defaults = MfConfig::default();
+        let built = panel.build_mf_config();
+
+        assert_eq!(built.window_size, defaults.window_size);
+        assert_eq!(built.slide_rate, defaults.slide_rate);
+        assert_eq!(built.language, defaults.language);
+        assert_eq!(built.use_pmi, defaults.use_pmi);
+        assert_eq!(built.min_count, defaults.min_count);
+        assert_eq!(built.min_pmi, defaults.min_pmi);
+        assert_eq!(built.unicode_normalize, defaults.unicode_normalize);
+        assert_eq!(built.sim_to_dist, defaults.sim_to_dist);
+        assert_eq!(built.slice_mode, defaults.slice_mode);
+        assert_eq!(built.slice_size, defaults.slice_size);
+        assert_eq!(built.min_tokens_per_slice, defaults.min_tokens_per_slice);
+        assert_eq!(built.shared_vocabulary, defaults.shared_vocabulary);
     }
 }

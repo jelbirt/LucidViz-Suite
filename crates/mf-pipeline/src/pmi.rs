@@ -73,6 +73,25 @@ pub fn compute_pmi(graph: &CooccurrenceGraph) -> Vec<f64> {
     out
 }
 
+/// Compute a simple count-based similarity matrix in `[0, 1]`.
+pub fn compute_count_similarity(graph: &CooccurrenceGraph) -> Vec<f64> {
+    let n = graph.vocab_size;
+    if n == 0 {
+        return vec![];
+    }
+
+    let max_count = graph.matrix.iter().copied().max().unwrap_or(0);
+    if max_count == 0 {
+        return vec![0.0; n * n];
+    }
+
+    graph
+        .matrix
+        .iter()
+        .map(|&count| count as f64 / max_count as f64)
+        .collect()
+}
+
 /// Compute PPMI (unnormalised) from a co-occurrence matrix.
 pub fn compute_ppmi(graph: &CooccurrenceGraph) -> Vec<f64> {
     let n = graph.vocab_size;
@@ -179,6 +198,19 @@ mod tests {
         for &v in &sim {
             assert!(!v.is_nan(), "NaN in similarity matrix");
             assert!(v >= 0.0, "negative value in similarity matrix");
+        }
+    }
+
+    #[test]
+    fn test_count_similarity_range() {
+        let toks = tokens(&["alpha", "beta", "alpha", "gamma"]);
+        let graph = build_cooccurrence(&toks, &basic_config());
+        let sim = compute_count_similarity(&graph);
+        for &v in &sim {
+            assert!(
+                (0.0..=1.0).contains(&v),
+                "count similarity should be normalized"
+            );
         }
     }
 }

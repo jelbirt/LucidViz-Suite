@@ -11,8 +11,8 @@ Rust rewrite of the legacy ETV Suite, replacing Python + Java with:
 | Component | Purpose |
 |-----------|---------|
 | **LV** (Lucid Visualization) | `wgpu`-based GPU-instanced renderer |
-| **AS** (AlignSpace) | MDS + Procrustes alignment pipeline |
-| **MF** (MatrixForge) | Co-occurrence + PPMI text-analysis pipeline |
+| **AS** (AlignSpace) | Distance-matrix embedding, structural equivalence, and Procrustes alignment |
+| **MF** (MatrixForge) | Co-occurrence + PMI/NPPMI text-analysis pipeline |
 
 ## Sample data
 
@@ -138,8 +138,8 @@ via `winres`.
 lucid-viz/
 ├── crates/
 │   ├── lv-data/        XLSX/JSON I/O + shared data model
-│   ├── as-pipeline/    AlignSpace: MDS, Procrustes, centrality
-│   ├── mf-pipeline/    MatrixForge: text → co-occurrence → SE matrix
+│   ├── as-pipeline/    AlignSpace: distance matrices, MDS, Procrustes, centrality
+│   ├── mf-pipeline/    MatrixForge: text -> co-occurrence -> similarity matrices
 │   ├── lv-renderer/    wgpu GPU renderer + LIS buffer
 │   ├── lv-gui/         egui panels and workspace
 │   ├── lv-audio/       MIDI audio engine
@@ -151,6 +151,14 @@ lucid-viz/
 │   └── icons/          Application icons
 └── .github/workflows/  CI configuration
 ```
+
+## MF -> AS bridge
+
+- `mf-pipeline` produces similarity matrices (`similarity_matrix`, `nppmi_matrix`, `ppmi_matrix`) plus MF-side centrality.
+- `as-pipeline` converts MF similarity into a distance matrix through `mf_output_to_distance_matrix` before running MDS (`mf_output_to_se_matrix` remains as a compatibility wrapper).
+- `MdsDimMode::Visual` is the legacy public enum name for the current 2D planar layout mode.
+- `as-pipeline` can also start from adjacency matrices, where it computes structural-equivalence distances internally.
+- Precomputed distance inputs do not imply a graph, so AS now marks centrality as unavailable for those runs instead of emitting zero-filled metrics.
 
 ## License
 

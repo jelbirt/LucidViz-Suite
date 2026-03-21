@@ -6,7 +6,7 @@ use anyhow::Result;
 use rust_xlsxwriter::{Format, Workbook};
 
 use crate::error::MfError;
-use crate::types::MfOutput;
+use crate::types::{MfOutput, MfSeriesOutput};
 
 /// Write the MF pipeline output as JSON.
 pub fn write_mf_json(output: &MfOutput, path: &Path) -> Result<()> {
@@ -15,13 +15,21 @@ pub fn write_mf_json(output: &MfOutput, path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Write the MF pipeline output as an XLSX workbook with 4 sheets.
+/// Write the MF temporal series output as JSON.
+pub fn write_mf_series_json(output: &MfSeriesOutput, path: &Path) -> Result<()> {
+    let json = serde_json::to_string_pretty(output)?;
+    std::fs::write(path, json)?;
+    Ok(())
+}
+
+/// Write the MF pipeline output as an XLSX workbook with 5 sheets.
 ///
 /// Sheets:
-///  1. "Vocabulary" — token, raw count, degree, distance, closeness, betweenness
-///  2. "PMI Matrix" — NPPMI values (n×n with token headers)
-///  3. "Similarity Matrix" — same as PMI Matrix (NPPMI = similarity)
-///  4. "Raw Counts" — raw co-occurrence counts
+///  1. "Vocabulary" — token, degree, distance, closeness, betweenness
+///  2. "NPPMI Matrix" — normalized positive PMI values
+///  3. "PPMI Matrix" — unnormalized positive PMI values
+///  4. "Similarity Matrix" — runtime-selected similarity matrix
+///  5. "Raw Counts" — raw co-occurrence counts
 pub fn write_mf_xlsx(output: &MfOutput, path: &Path, raw_counts: &[u64]) -> Result<()> {
     let mut wb = Workbook::new();
     let bold = Format::new().set_bold();
@@ -53,17 +61,27 @@ pub fn write_mf_xlsx(output: &MfOutput, path: &Path, raw_counts: &[u64]) -> Resu
         }
     }
 
-    // ---- Sheet 2: PMI Matrix (NPPMI = similarity) ----
+    // ---- Sheet 2: NPPMI Matrix ----
     write_square_matrix_sheet(
         &mut wb,
-        "PMI Matrix",
+        "NPPMI Matrix",
         &output.labels,
-        &output.similarity_matrix,
+        &output.nppmi_matrix,
         n,
         &bold,
     )?;
 
-    // ---- Sheet 3: Similarity Matrix ----
+    // ---- Sheet 3: PPMI Matrix ----
+    write_square_matrix_sheet(
+        &mut wb,
+        "PPMI Matrix",
+        &output.labels,
+        &output.ppmi_matrix,
+        n,
+        &bold,
+    )?;
+
+    // ---- Sheet 4: Similarity Matrix ----
     write_square_matrix_sheet(
         &mut wb,
         "Similarity Matrix",
@@ -73,7 +91,7 @@ pub fn write_mf_xlsx(output: &MfOutput, path: &Path, raw_counts: &[u64]) -> Resu
         &bold,
     )?;
 
-    // ---- Sheet 4: Raw Counts ----
+    // ---- Sheet 5: Raw Counts ----
     {
         let ws = wb.add_worksheet();
         ws.set_name("Raw Counts")

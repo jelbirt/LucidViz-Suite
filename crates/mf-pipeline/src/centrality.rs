@@ -1,11 +1,14 @@
 //! Centrality computation for the MF pipeline co-occurrence graph.
 //!
-//! Re-uses the same parallel Brandes algorithm as the AS pipeline,
+//! Uses the same weighted shortest-path methodology as AlignSpace,
 //! but operates directly on a petgraph `UnGraph<String, f64>`.
 
 use petgraph::algo::dijkstra;
 use petgraph::graph::{NodeIndex, UnGraph};
+use petgraph::visit::EdgeRef;
 use rayon::prelude::*;
+use std::cmp::Ordering;
+use std::collections::BinaryHeap;
 
 use as_pipeline::types::CentralityReport;
 
@@ -69,7 +72,7 @@ pub fn compute_centrality_mf(pg: &UnGraph<String, f64>, labels: &[String]) -> Ce
         .map(|&d| if d > 1e-15 { 1.0 / d } else { 0.0 })
         .collect();
 
-    // --- Parallel Brandes betweenness (via adjacency-list Brandes) ---
+    // --- Parallel weighted Brandes betweenness ---
     let betweenness = compute_betweenness_pg(pg);
 
     CentralityReport {
@@ -81,8 +84,32 @@ pub fn compute_centrality_mf(pg: &UnGraph<String, f64>, labels: &[String]) -> Ce
     }
 }
 
-/// Full betweenness computation using an adjacency list (array-of-arrays).
-pub(crate) fn betweenness_from_adj_list(adj: &[Vec<usize>], n: usize) -> Vec<f64> {
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct State {
+    cost: f64,
+    node: usize,
+}
+
+impl Eq for State {}
+
+impl Ord for State {
+    fn cmp(&self, other: &Self) -> Ordering {
+        other
+            .cost
+            .partial_cmp(&self.cost)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| self.node.cmp(&other.node))
+    }
+}
+
+impl PartialOrd for State {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/// Full betweenness computation using a weighted adjacency list.
+pub(crate) fn betweenness_from_adj_list(adj: &[Vec<(usize, f64)>], n: usize) -> Vec<f64> {
     let partials: Vec<Vec<f64>> = (0..n)
         .into_par_iter()
         .map(|s| brandes_source_adj(adj, n, s))
@@ -103,27 +130,40 @@ pub(crate) fn betweenness_from_adj_list(adj: &[Vec<usize>], n: usize) -> Vec<f64
     between.iter().map(|&b| b / 2.0 / norm).collect()
 }
 
-fn brandes_source_adj(adj: &[Vec<usize>], n: usize, s: usize) -> Vec<f64> {
-    use std::collections::VecDeque;
-
+fn brandes_source_adj(adj: &[Vec<(usize, f64)>], n: usize, s: usize) -> Vec<f64> {
+    const EPS: f64 = 1e-12;
     let mut sigma = vec![0.0f64; n];
-    let mut dist = vec![-1i64; n];
+    let mut dist = vec![f64::INFINITY; n];
     let mut pred: Vec<Vec<usize>> = vec![vec![]; n];
     let mut stack: Vec<usize> = Vec::new();
-    let mut queue: VecDeque<usize> = VecDeque::new();
+    let mut heap = BinaryHeap::new();
+    let mut settled = vec![false; n];
 
     sigma[s] = 1.0;
-    dist[s] = 0;
-    queue.push_back(s);
+    dist[s] = 0.0;
+    heap.push(State { cost: 0.0, node: s });
 
-    while let Some(v) = queue.pop_front() {
+    while let Some(State { cost, node: v }) = heap.pop() {
+        if cost > dist[v] + EPS || settled[v] {
+            continue;
+        }
+        settled[v] = true;
         stack.push(v);
-        for &w in &adj[v] {
-            if dist[w] < 0 {
-                queue.push_back(w);
-                dist[w] = dist[v] + 1;
+        for &(w, weight) in &adj[v] {
+            if weight <= 0.0 {
+                continue;
             }
-            if dist[w] == dist[v] + 1 {
+            let next = dist[v] + (1.0 / weight);
+            if next + EPS < dist[w] {
+                dist[w] = next;
+                sigma[w] = sigma[v];
+                pred[w].clear();
+                pred[w].push(v);
+                heap.push(State {
+                    cost: next,
+                    node: w,
+                });
+            } else if (next - dist[w]).abs() <= EPS {
                 sigma[w] += sigma[v];
                 pred[w].push(v);
             }
@@ -131,13 +171,19 @@ fn brandes_source_adj(adj: &[Vec<usize>], n: usize, s: usize) -> Vec<f64> {
     }
 
     let mut delta = vec![0.0f64; n];
+    let mut partial = vec![0.0f64; n];
     while let Some(w) = stack.pop() {
         for &v in &pred[w] {
-            delta[v] += (sigma[v] / sigma[w]) * (1.0 + delta[w]);
+            if sigma[w] > EPS {
+                delta[v] += (sigma[v] / sigma[w]) * (1.0 + delta[w]);
+            }
+        }
+        if w != s {
+            partial[w] = delta[w];
         }
     }
 
-    delta
+    partial
 }
 
 /// Build an adjacency list from a petgraph and compute betweenness via Brandes.
@@ -149,12 +195,17 @@ pub fn compute_betweenness_pg(pg: &UnGraph<String, f64>) -> Vec<f64> {
     let idx_map: std::collections::HashMap<NodeIndex, usize> =
         nodes.iter().enumerate().map(|(i, &ni)| (ni, i)).collect();
 
-    // Build adjacency list (unweighted BFS).
-    let adj: Vec<Vec<usize>> = nodes
+    // Build weighted adjacency list.
+    let adj: Vec<Vec<(usize, f64)>> = nodes
         .iter()
         .map(|&ni| {
-            pg.neighbors(ni)
-                .filter_map(|nb| idx_map.get(&nb).copied())
+            pg.edges(ni)
+                .filter_map(|edge| {
+                    idx_map
+                        .get(&edge.target())
+                        .copied()
+                        .map(|idx| (idx, *edge.weight()))
+                })
                 .collect()
         })
         .collect();
@@ -228,5 +279,32 @@ pub fn compute_centrality_full(pg: &UnGraph<String, f64>, labels: &[String]) -> 
         distance,
         closeness,
         betweenness,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn graph_from_weighted_edges(n: usize, edges: &[(usize, usize, f64)]) -> UnGraph<String, f64> {
+        let mut graph = UnGraph::new_undirected();
+        let nodes: Vec<_> = (0..n).map(|i| graph.add_node(format!("n{i}"))).collect();
+        for &(a, b, w) in edges {
+            graph.add_edge(nodes[a], nodes[b], w);
+        }
+        graph
+    }
+
+    fn labels(n: usize) -> Vec<String> {
+        (0..n).map(|i| format!("n{i}")).collect()
+    }
+
+    #[test]
+    fn weighted_betweenness_prefers_stronger_two_hop_path() {
+        let graph = graph_from_weighted_edges(3, &[(0, 1, 1.0), (1, 2, 1.0), (0, 2, 0.4)]);
+        let report = compute_centrality_mf(&graph, &labels(3));
+
+        assert!(report.betweenness[1] > report.betweenness[0]);
+        assert!(report.betweenness[1] > report.betweenness[2]);
     }
 }

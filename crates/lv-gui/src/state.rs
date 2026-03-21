@@ -5,6 +5,15 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 
 use lv_data::{EtvDataset, LisBuffer, LisConfig, ShapeKind};
+use mf_pipeline::types::{MfOutput, MfSeriesOutput};
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AsInputSource {
+    #[default]
+    Dataset,
+    MatrixForge,
+    MatrixForgeSeries,
+}
 
 /// Per-object visual override applied when building LisFrames.
 #[derive(Clone, Debug)]
@@ -27,7 +36,10 @@ pub enum PlayState {
 pub struct AppState {
     // ── Dataset ─────────────────────────────────────────────────────────────
     pub dataset: Option<EtvDataset>,
+    pub mf_output: Option<MfOutput>,
+    pub mf_series_output: Option<MfSeriesOutput>,
     pub source_path: Option<PathBuf>,
+    pub as_input_source: AsInputSource,
 
     // ── LIS ─────────────────────────────────────────────────────────────────
     pub lis_config: LisConfig,
@@ -78,7 +90,10 @@ impl AppState {
     pub fn new() -> Self {
         Self {
             dataset: None,
+            mf_output: None,
+            mf_series_output: None,
             source_path: None,
+            as_input_source: AsInputSource::Dataset,
             lis_config: LisConfig::default(),
             lis_buffer: None,
             slice_index: 0,

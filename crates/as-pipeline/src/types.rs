@@ -8,20 +8,20 @@ use serde::{Deserialize, Serialize};
 // Structural equivalence matrix
 // ---------------------------------------------------------------------------
 
-/// A symmetric distance matrix derived from structural equivalence.
+/// A symmetric distance matrix used by MDS and related alignment stages.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SeMatrix {
+pub struct DistanceMatrix {
     pub labels: Vec<String>,
     /// Row-major, n×n.
     pub data: Vec<f64>,
     pub n: usize,
 }
 
-impl SeMatrix {
+impl DistanceMatrix {
     pub fn new(labels: Vec<String>, data: Vec<f64>) -> Self {
         let n = labels.len();
-        assert_eq!(data.len(), n * n, "SeMatrix data length mismatch");
-        SeMatrix { labels, data, n }
+        assert_eq!(data.len(), n * n, "DistanceMatrix data length mismatch");
+        DistanceMatrix { labels, data, n }
     }
 
     #[inline]
@@ -34,6 +34,10 @@ impl SeMatrix {
         self.data[i * self.n + j] = v;
     }
 }
+
+/// Legacy alias retained for compatibility with existing code and serialized
+/// artifacts that still refer to a structural-equivalence matrix.
+pub type SeMatrix = DistanceMatrix;
 
 // ---------------------------------------------------------------------------
 // MDS output
@@ -110,6 +114,12 @@ pub struct CentralityReport {
     pub betweenness: Vec<f64>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum CentralityState {
+    Computed(CentralityReport),
+    Unavailable { labels: Vec<String>, reason: String },
+}
+
 // ---------------------------------------------------------------------------
 // MDS configuration
 // ---------------------------------------------------------------------------
@@ -152,7 +162,7 @@ pub enum SmacofInit {
 pub enum MdsDimMode {
     /// Use all valid dimensions.
     Maximum,
-    /// Use 2 dimensions (for 2D visual layout).
+    /// Legacy public name for the 2D planar layout mode.
     Visual,
     /// Use exactly this many dimensions.
     Fixed(usize),
@@ -185,11 +195,23 @@ pub struct AsPipelineInput {
     pub procrustes_scale: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct AsDistancePipelineInput {
+    /// (dataset_name, distance_matrix) pairs — one per time step.
+    pub datasets: Vec<(String, DistanceMatrix)>,
+    pub mds_config: MdsConfig,
+    pub procrustes_mode: ProcrustesMode,
+    pub mds_dims: MdsDimMode,
+    pub normalize: bool,
+    pub target_range: f64,
+    pub procrustes_scale: bool,
+}
+
 #[derive(Debug)]
 pub struct AsPipelineResult {
     pub coordinates: Vec<MdsCoordinates>,
     pub procrustes: Vec<ProcrustesResult>,
-    pub centralities: Vec<CentralityReport>,
-    pub se_matrices: Vec<SeMatrix>,
+    pub centralities: Vec<CentralityState>,
+    pub distance_matrices: Vec<DistanceMatrix>,
     pub etv_dataset: EtvDataset,
 }

@@ -6,7 +6,7 @@
 
 use as_pipeline::{
     pipeline::run_pipeline,
-    types::{AsPipelineInput, MdsConfig, MdsDimMode, ProcrustesMode},
+    types::{AsPipelineInput, CentralityState, MdsConfig, MdsDimMode, ProcrustesMode},
 };
 use ndarray::Array2;
 use std::io::{BufRead, BufReader};
@@ -69,7 +69,7 @@ fn test_as_pipeline_e2e_single_timestep() {
     // One time step → one set of coordinates, centralities, SE matrices.
     assert_eq!(result.coordinates.len(), 1);
     assert_eq!(result.centralities.len(), 1);
-    assert_eq!(result.se_matrices.len(), 1);
+    assert_eq!(result.distance_matrices.len(), 1);
 
     let coords = &result.coordinates[0];
     assert_eq!(coords.n, n);
@@ -88,13 +88,16 @@ fn test_as_pipeline_e2e_single_timestep() {
     assert!(coords.stress < 0.5, "stress={} too high", coords.stress);
 
     // Centrality report has correct number of labels.
-    let centrality = &result.centralities[0];
+    let centrality = match &result.centralities[0] {
+        CentralityState::Computed(report) => report,
+        CentralityState::Unavailable { .. } => panic!("expected computed adjacency centrality"),
+    };
     assert_eq!(centrality.labels.len(), n);
     assert_eq!(centrality.degree.len(), n);
     assert_eq!(centrality.betweenness.len(), n);
 
     // SE matrix is symmetric and has zero diagonal.
-    let se = &result.se_matrices[0];
+    let se = &result.distance_matrices[0];
     assert_eq!(se.n, n);
     for i in 0..n {
         assert!(se.get(i, i) < 1e-12, "SE diagonal non-zero at {}", i);
@@ -144,4 +147,87 @@ fn test_as_pipeline_e2e_two_timesteps() {
     let p0 = &result.procrustes[0];
     assert!((p0.scale - 1.0).abs() < 1e-10, "scale0={}", p0.scale);
     assert!(p0.residual < 1e-10, "residual0={}", p0.residual);
+
+    for (idx, state) in result.centralities.iter().enumerate() {
+        match state {
+            CentralityState::Computed(report) => assert_eq!(report.labels, labels),
+            CentralityState::Unavailable { .. } => {
+                panic!("timestep {idx} centrality unexpectedly unavailable")
+            }
+        }
+    }
+}
+
+#[test]
+fn test_as_pipeline_optimal_choice_runs_and_preserves_labels() {
+    let labels = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+    let adj1 = Array2::from_shape_vec((3, 3), vec![0.0, 1.0, 0.2, 1.0, 0.0, 0.2, 0.2, 0.2, 0.0])
+        .expect("adj1 shape");
+    let adj2 = Array2::from_shape_vec((3, 3), vec![0.0, 1.0, 0.5, 1.0, 0.0, 0.5, 0.5, 0.5, 0.0])
+        .expect("adj2 shape");
+    let adj3 = Array2::from_shape_vec((3, 3), vec![0.0, 1.0, 0.8, 1.0, 0.0, 0.8, 0.8, 0.8, 0.0])
+        .expect("adj3 shape");
+
+    let input = AsPipelineInput {
+        datasets: vec![
+            ("T1".to_string(), adj1),
+            ("T2".to_string(), adj2),
+            ("T3".to_string(), adj3),
+        ],
+        labels,
+        mds_config: MdsConfig::Classical,
+        procrustes_mode: ProcrustesMode::OptimalChoice,
+        mds_dims: MdsDimMode::Visual,
+        normalize: false,
+        target_range: 1.0,
+        procrustes_scale: false,
+    };
+
+    let result = run_pipeline(&input).expect("optimal choice pipeline failed");
+
+    assert_eq!(result.coordinates.len(), 3);
+    assert_eq!(result.procrustes.len(), 3);
+    assert_eq!(
+        result
+            .procrustes
+            .iter()
+            .filter(|r| r.residual.abs() < 1e-12)
+            .count(),
+        1
+    );
+    for coords in &result.coordinates {
+        assert_eq!(coords.labels, vec!["a", "b", "c"]);
+        assert!(coords.data.iter().all(|v| v.is_finite()));
+    }
+}
+
+#[test]
+fn test_as_pipeline_3d_export_preserves_z_coordinates() {
+    let csv_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/fixtures/sample_adjacency.csv"
+    );
+
+    let (labels, adj) = parse_adjacency_csv(csv_path);
+    let input = AsPipelineInput {
+        datasets: vec![("T1".to_string(), adj)],
+        labels,
+        mds_config: MdsConfig::Classical,
+        procrustes_mode: ProcrustesMode::None,
+        mds_dims: MdsDimMode::Fixed(3),
+        normalize: false,
+        target_range: 1.0,
+        procrustes_scale: false,
+    };
+
+    let result = run_pipeline(&input).expect("3d pipeline failed");
+    let coords = &result.coordinates[0];
+    let rows = &result.etv_dataset.sheets[0].rows;
+
+    assert_eq!(coords.dims, 3);
+    assert_eq!(rows.len(), coords.n);
+    for (i, row) in rows.iter().enumerate() {
+        assert_eq!(row.label, coords.labels[i]);
+        assert!((row.z - coords.data[i * coords.dims + 2]).abs() < 1e-12);
+    }
 }

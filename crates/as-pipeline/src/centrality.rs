@@ -3,12 +3,15 @@
 //! Computes degree, distance (mean shortest path), closeness, and betweenness
 //! centrality from a weighted adjacency matrix.
 //!
-//! Betweenness uses a parallel Brandes algorithm via rayon.
+//! Betweenness uses a weighted parallel Brandes algorithm via rayon.
 
 use ndarray::Array2;
 use petgraph::algo::dijkstra;
 use petgraph::graph::{NodeIndex, UnGraph};
+use petgraph::visit::EdgeRef;
 use rayon::prelude::*;
+use std::cmp::Ordering;
+use std::collections::BinaryHeap;
 
 use crate::types::CentralityReport;
 
@@ -87,8 +90,9 @@ pub fn compute_centrality(adj: &Array2<f64>, labels: &[String]) -> CentralityRep
         .map(|&d| if d > 1e-15 { 1.0 / d } else { 0.0 })
         .collect();
 
-    // --- Betweenness centrality (parallel Brandes, undirected) ---
-    let betweenness = parallel_brandes_betweenness(&graph, &nodes, n);
+    // --- Betweenness centrality (parallel weighted Brandes, undirected) ---
+    let weighted_adj = weighted_adjacency(&graph, &nodes);
+    let betweenness = parallel_brandes_betweenness(&weighted_adj, n);
 
     CentralityReport {
         labels: labels.to_vec(),
@@ -99,17 +103,49 @@ pub fn compute_centrality(adj: &Array2<f64>, labels: &[String]) -> CentralityRep
     }
 }
 
-/// Parallel Brandes betweenness centrality for an unweighted/binary graph.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct State {
+    cost: f64,
+    node: usize,
+}
+
+impl Eq for State {}
+
+impl Ord for State {
+    fn cmp(&self, other: &Self) -> Ordering {
+        other
+            .cost
+            .partial_cmp(&self.cost)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| self.node.cmp(&other.node))
+    }
+}
+
+impl PartialOrd for State {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+fn weighted_adjacency(graph: &UnGraph<usize, f64>, nodes: &[NodeIndex]) -> Vec<Vec<(usize, f64)>> {
+    nodes
+        .iter()
+        .map(|&node| {
+            graph
+                .edges(node)
+                .map(|edge| (graph[edge.target()], *edge.weight()))
+                .collect()
+        })
+        .collect()
+}
+
+/// Parallel Brandes betweenness centrality for a weighted graph.
 /// Normalises by (n-1)(n-2)/2 for undirected graphs.
-fn parallel_brandes_betweenness(
-    graph: &UnGraph<usize, f64>,
-    nodes: &[NodeIndex],
-    n: usize,
-) -> Vec<f64> {
+fn parallel_brandes_betweenness(weighted_adj: &[Vec<(usize, f64)>], n: usize) -> Vec<f64> {
     // Each source node contributes a partial delta vector.
     let partials: Vec<Vec<f64>> = (0..n)
         .into_par_iter()
-        .map(|s| brandes_source(graph, nodes, n, s))
+        .map(|s| brandes_source(weighted_adj, n, s))
         .collect();
 
     // Sum partials.
@@ -131,36 +167,42 @@ fn parallel_brandes_betweenness(
     between.iter().map(|&b| b / 2.0 / norm).collect()
 }
 
-/// Brandes algorithm for a single source `s` (unweighted BFS-based).
+/// Brandes algorithm for a single source `s` using weighted shortest paths.
 /// Returns a partial delta vector for all nodes.
-fn brandes_source(
-    graph: &UnGraph<usize, f64>,
-    nodes: &[NodeIndex],
-    n: usize,
-    s: usize,
-) -> Vec<f64> {
-    use std::collections::VecDeque;
-
+fn brandes_source(weighted_adj: &[Vec<(usize, f64)>], n: usize, s: usize) -> Vec<f64> {
+    const EPS: f64 = 1e-12;
     let mut sigma = vec![0.0f64; n]; // num shortest paths from s
-    let mut dist = vec![-1i64; n]; // BFS distance
+    let mut dist = vec![f64::INFINITY; n];
     let mut pred: Vec<Vec<usize>> = vec![vec![]; n];
     let mut stack: Vec<usize> = Vec::new();
-    let mut queue: VecDeque<usize> = VecDeque::new();
+    let mut heap = BinaryHeap::new();
+    let mut settled = vec![false; n];
 
     sigma[s] = 1.0;
-    dist[s] = 0;
-    queue.push_back(s);
+    dist[s] = 0.0;
+    heap.push(State { cost: 0.0, node: s });
 
-    while let Some(v) = queue.pop_front() {
+    while let Some(State { cost, node: v }) = heap.pop() {
+        if cost > dist[v] + EPS || settled[v] {
+            continue;
+        }
+        settled[v] = true;
         stack.push(v);
-        // Neighbours.
-        for nb in graph.neighbors(nodes[v]) {
-            let w = nb.index();
-            if dist[w] < 0 {
-                queue.push_back(w);
-                dist[w] = dist[v] + 1;
+        for &(w, weight) in &weighted_adj[v] {
+            if weight <= 0.0 {
+                continue;
             }
-            if dist[w] == dist[v] + 1 {
+            let next = dist[v] + (1.0 / weight);
+            if next + EPS < dist[w] {
+                dist[w] = next;
+                sigma[w] = sigma[v];
+                pred[w].clear();
+                pred[w].push(v);
+                heap.push(State {
+                    cost: next,
+                    node: w,
+                });
+            } else if (next - dist[w]).abs() <= EPS {
                 sigma[w] += sigma[v];
                 pred[w].push(v);
             }
@@ -168,16 +210,19 @@ fn brandes_source(
     }
 
     let mut delta = vec![0.0f64; n];
+    let mut partial = vec![0.0f64; n];
     while let Some(w) = stack.pop() {
         for &v in &pred[w] {
-            delta[v] += (sigma[v] / sigma[w]) * (1.0 + delta[w]);
+            if sigma[w] > EPS {
+                delta[v] += (sigma[v] / sigma[w]) * (1.0 + delta[w]);
+            }
         }
         if w != s {
-            // delta[w] is the contribution of w through s
+            partial[w] = delta[w];
         }
     }
 
-    delta
+    partial
 }
 
 // ---------------------------------------------------------------------------
@@ -242,5 +287,22 @@ mod tests {
         for &c in &report.closeness {
             assert!(c > 0.0, "closeness={}", c);
         }
+    }
+
+    #[test]
+    fn test_weighted_betweenness_prefers_stronger_two_hop_path() {
+        let n = 3;
+        let mut adj = Array2::<f64>::zeros((n, n));
+        adj[[0, 1]] = 1.0;
+        adj[[1, 0]] = 1.0;
+        adj[[1, 2]] = 1.0;
+        adj[[2, 1]] = 1.0;
+        adj[[0, 2]] = 0.4;
+        adj[[2, 0]] = 0.4;
+
+        let report = compute_centrality(&adj, &labels(n));
+
+        assert!(report.betweenness[1] > report.betweenness[0]);
+        assert!(report.betweenness[1] > report.betweenness[2]);
     }
 }

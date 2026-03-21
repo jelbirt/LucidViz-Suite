@@ -419,6 +419,10 @@ The code keeps the full form for correctness with directed graphs.
 
 After laying out nodes, we need visual encodings — what determines node size, color, etc.? Centrality measures quantify "how important" each node is.
 
+This step is only well-defined when AlignSpace has an adjacency graph to analyze. If AS is running from a precomputed distance matrix (for example, MatrixForge similarity converted directly to distance), the current code treats graph centrality as unavailable rather than inventing zero-valued metrics.
+
+When an adjacency graph is available, both distance/closeness and betweenness now use weighted shortest paths with edge cost `1 / weight`, so stronger ties behave as shorter paths consistently across the centrality report.
+
 ---
 
 ### Degree Centrality
@@ -814,6 +818,8 @@ word5: ( 0.53,  0.05)
 ```
 
 **Step 3 — Visual interpretation:**
+
+In the public API, `MdsDimMode::Visual` is the legacy enum name for the current 2D planar layout mode.
 
 ```
          ↑ y

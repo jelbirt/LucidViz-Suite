@@ -31,17 +31,45 @@ pub fn build_cooccurrence(tokens: &[Token], config: &MfConfig) -> CooccurrenceGr
         return CooccurrenceGraph::new(vocab, config.window_size, config.slide_rate);
     }
 
+    let n = vocab.len();
+    build_cooccurrence_for_vocab(tokens, vocab, n, config.window_size, config.slide_rate)
+}
+
+/// Build a co-occurrence matrix using an already fixed/shared vocabulary.
+pub fn build_cooccurrence_with_vocab(
+    tokens: &[Token],
+    vocab: &[Token],
+    config: &MfConfig,
+) -> CooccurrenceGraph {
+    build_cooccurrence_for_vocab(
+        tokens,
+        vocab.to_vec(),
+        vocab.len(),
+        config.window_size,
+        config.slide_rate,
+    )
+}
+
+fn build_cooccurrence_for_vocab(
+    tokens: &[Token],
+    vocab: Vec<Token>,
+    n: usize,
+    window: usize,
+    slide_rate: usize,
+) -> CooccurrenceGraph {
+    if vocab.is_empty() {
+        return CooccurrenceGraph::new(vocab, window, slide_rate);
+    }
+
+    let slide = slide_rate.max(1);
+    let num_tokens = tokens.len();
+
     // Build vocab index for O(1) lookup.
     let vocab_index: HashMap<&str, usize> = vocab
         .iter()
         .enumerate()
         .map(|(i, t)| (t.as_str(), i))
         .collect();
-
-    let n = vocab.len();
-    let window = config.window_size;
-    let slide = config.slide_rate;
-    let num_tokens = tokens.len();
 
     // Determine chunk boundaries for parallelism.
     // Each chunk covers a window of `2*window + slide` tokens so adjacent
@@ -77,11 +105,16 @@ pub fn build_cooccurrence(tokens: &[Token], config: &MfConfig) -> CooccurrenceGr
     let partial_matrices: Vec<Vec<u64>> = chunks
         .par_iter()
         .zip(chunk_starts.par_iter())
-        .map(|(chunk, &_chunk_start)| {
+        .map(|(chunk, &chunk_start)| {
             let mut mat = vec![0u64; n * n];
             let len = chunk.len();
-            let mut pos = 0;
-            while pos < len {
+            let local_center_end = (chunk_size).min(len);
+            let mut pos = if slide > 1 {
+                (slide - (chunk_start % slide)) % slide
+            } else {
+                0
+            };
+            while pos < local_center_end {
                 if let Some(&ci) = vocab_index.get(chunk[pos].as_str()) {
                     // Look left and right within the window.
                     let left = pos.saturating_sub(window);
@@ -106,6 +139,14 @@ pub fn build_cooccurrence(tokens: &[Token], config: &MfConfig) -> CooccurrenceGr
     for partial in partial_matrices {
         for (i, &v) in partial.iter().enumerate() {
             total_mat[i] += v;
+        }
+    }
+
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let mirrored = total_mat[i * n + j].max(total_mat[j * n + i]);
+            total_mat[i * n + j] = mirrored;
+            total_mat[j * n + i] = mirrored;
         }
     }
 
@@ -166,5 +207,24 @@ mod tests {
             graph.vocab.iter().all(|t| t.as_str() != "rare"),
             "'rare' should be filtered by min_count=2"
         );
+    }
+
+    #[test]
+    fn test_cooccurrence_chunk_boundaries_match_reference() {
+        let toks = tokens(&["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l"]);
+        let cfg = MfConfig {
+            window_size: 2,
+            slide_rate: 2,
+            min_count: 1,
+            ..MfConfig::default()
+        };
+        let graph = build_cooccurrence(&toks, &cfg);
+
+        let vocab_words: Vec<&str> = graph.vocab.iter().map(|t| t.as_str()).collect();
+        let g = vocab_words.iter().position(|&w| w == "g").unwrap();
+        let h = vocab_words.iter().position(|&w| w == "h").unwrap();
+
+        assert_eq!(graph.get(g, h), 1, "boundary pairs should not double-count");
+        assert_eq!(graph.get(h, g), 1, "matrix should remain symmetric");
     }
 }
