@@ -13,7 +13,7 @@ use as_pipeline::types::{
 };
 use lv_data::schema::EtvDataset;
 use lv_data::validate_dataset;
-use mf_pipeline::pipeline::mf_series_output_to_as_input;
+use mf_pipeline::pipeline::{mf_series_output_to_as_input, MfSeriesAsInputOptions};
 use ndarray::Array2;
 
 use crate::state::{AppState, AsInputSource, PipelineEvent, PipelineJob};
@@ -433,13 +433,15 @@ impl AsPanel {
 
             let input = mf_series_output_to_as_input(
                 &output,
-                mds_config,
-                procrustes_mode,
-                dim_mode,
-                normalize,
-                normalization_mode,
-                target_range,
-                true,
+                MfSeriesAsInputOptions {
+                    mds_config,
+                    procrustes_mode,
+                    mds_dims: dim_mode,
+                    normalize,
+                    normalization_mode,
+                    target_range,
+                    procrustes_scale: true,
+                },
             );
 
             match run_distance_pipeline(&input) {

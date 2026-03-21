@@ -166,15 +166,21 @@ pub fn run_mf_series_pipeline(config: &MfPipelineConfig) -> Result<MfSeriesOutpu
 }
 
 /// Convert MatrixForge series output into an AlignSpace multi-step distance input.
+#[derive(Debug, Clone)]
+pub struct MfSeriesAsInputOptions {
+    pub mds_config: MdsConfig,
+    pub procrustes_mode: ProcrustesMode,
+    pub mds_dims: MdsDimMode,
+    pub normalize: bool,
+    pub normalization_mode: NormalizationMode,
+    pub target_range: f64,
+    pub procrustes_scale: bool,
+}
+
+/// Convert MatrixForge series output into an AlignSpace multi-step distance input.
 pub fn mf_series_output_to_as_input(
     output: &MfSeriesOutput,
-    mds_config: MdsConfig,
-    procrustes_mode: ProcrustesMode,
-    mds_dims: MdsDimMode,
-    normalize: bool,
-    normalization_mode: NormalizationMode,
-    target_range: f64,
-    procrustes_scale: bool,
+    options: MfSeriesAsInputOptions,
 ) -> AsDistancePipelineInput {
     let datasets = output
         .slices
@@ -194,13 +200,13 @@ pub fn mf_series_output_to_as_input(
 
     AsDistancePipelineInput {
         datasets,
-        mds_config,
-        procrustes_mode,
-        mds_dims,
-        normalize,
-        normalization_mode,
-        target_range,
-        procrustes_scale,
+        mds_config: options.mds_config,
+        procrustes_mode: options.procrustes_mode,
+        mds_dims: options.mds_dims,
+        normalize: options.normalize,
+        normalization_mode: options.normalization_mode,
+        target_range: options.target_range,
+        procrustes_scale: options.procrustes_scale,
     }
 }
 

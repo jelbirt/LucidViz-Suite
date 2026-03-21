@@ -3,7 +3,10 @@
 //! Reads sample_corpus.txt, runs the full MF pipeline, and validates output.
 
 use mf_pipeline::{
-    pipeline::{mf_series_output_to_as_input, run_mf_pipeline, run_mf_series_pipeline},
+    pipeline::{
+        mf_series_output_to_as_input, run_mf_pipeline, run_mf_series_pipeline,
+        MfSeriesAsInputOptions,
+    },
     types::{MfConfig, MfPipelineConfig, MfSliceMode},
 };
 use std::io::Write;
@@ -311,13 +314,15 @@ fn test_mf_series_pipeline_bridges_to_as_distance_pipeline() {
 
     let input = mf_series_output_to_as_input(
         &series,
-        MdsConfig::Classical,
-        ProcrustesMode::TimeSeries,
-        MdsDimMode::Visual,
-        true,
-        NormalizationMode::Independent,
-        300.0,
-        true,
+        MfSeriesAsInputOptions {
+            mds_config: MdsConfig::Classical,
+            procrustes_mode: ProcrustesMode::TimeSeries,
+            mds_dims: MdsDimMode::Visual,
+            normalize: true,
+            normalization_mode: NormalizationMode::Independent,
+            target_range: 300.0,
+            procrustes_scale: true,
+        },
     );
 
     let result = run_distance_pipeline(&input).expect("distance pipeline failed");
@@ -383,13 +388,15 @@ fn test_single_output_and_single_slice_series_produce_same_distance_dataset() {
     };
     let series_input = mf_series_output_to_as_input(
         &series,
-        MdsConfig::Classical,
-        ProcrustesMode::None,
-        MdsDimMode::Fixed(3),
-        true,
-        NormalizationMode::Independent,
-        300.0,
-        true,
+        MfSeriesAsInputOptions {
+            mds_config: MdsConfig::Classical,
+            procrustes_mode: ProcrustesMode::None,
+            mds_dims: MdsDimMode::Fixed(3),
+            normalize: true,
+            normalization_mode: NormalizationMode::Independent,
+            target_range: 300.0,
+            procrustes_scale: true,
+        },
     );
     let series_result =
         run_distance_pipeline(&series_input).expect("series distance pipeline failed");
