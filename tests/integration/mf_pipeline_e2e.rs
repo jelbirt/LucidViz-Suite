@@ -138,7 +138,8 @@ fn test_mf_pipeline_e2e_as_bridge() {
         &output.similarity_matrix,
         n,
         output.sim_to_dist,
-    );
+    )
+    .expect("distance matrix conversion failed");
 
     let coords = run_mds(&se, &MdsConfig::Classical, MdsDimMode::Visual).expect("MDS failed");
 
@@ -323,7 +324,8 @@ fn test_mf_series_pipeline_bridges_to_as_distance_pipeline() {
             target_range: 300.0,
             procrustes_scale: true,
         },
-    );
+    )
+    .expect("series conversion failed");
 
     let result = run_distance_pipeline(&input).expect("distance pipeline failed");
     assert_eq!(result.coordinates.len(), 2);
@@ -361,7 +363,8 @@ fn test_single_output_and_single_slice_series_produce_same_distance_dataset() {
                 &output.similarity_matrix,
                 output.n,
                 output.sim_to_dist,
-            ),
+            )
+            .expect("distance matrix conversion failed"),
         )],
         mds_config: MdsConfig::Classical,
         procrustes_mode: ProcrustesMode::None,
@@ -397,7 +400,8 @@ fn test_single_output_and_single_slice_series_produce_same_distance_dataset() {
             target_range: 300.0,
             procrustes_scale: true,
         },
-    );
+    )
+    .expect("series conversion failed");
     let series_result =
         run_distance_pipeline(&series_input).expect("series distance pipeline failed");
 

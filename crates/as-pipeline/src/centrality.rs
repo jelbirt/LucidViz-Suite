@@ -13,6 +13,7 @@ use rayon::prelude::*;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
+use crate::error::AsError;
 use crate::types::CentralityReport;
 
 /// Compute centrality measures from an adjacency matrix using the pipeline's
@@ -25,10 +26,25 @@ use crate::types::CentralityReport;
 ///
 /// Edge weight threshold: an edge exists if `adj[i,j] > 0`.
 /// Dijkstra uses `1 / weight` as edge cost so stronger ties are "shorter".
-pub fn compute_centrality(adj: &Array2<f64>, labels: &[String]) -> CentralityReport {
+pub fn compute_centrality(
+    adj: &Array2<f64>,
+    labels: &[String],
+) -> Result<CentralityReport, AsError> {
     let n = adj.nrows();
-    assert_eq!(n, adj.ncols());
-    assert_eq!(n, labels.len());
+    if n != adj.ncols() {
+        return Err(AsError::DimensionMismatch(format!(
+            "Centrality adjacency must be square, got {}x{}",
+            n,
+            adj.ncols()
+        )));
+    }
+    if n != labels.len() {
+        return Err(AsError::DimensionMismatch(format!(
+            "Centrality label count {} does not match adjacency size {}",
+            labels.len(),
+            n
+        )));
+    }
 
     // Build petgraph UnGraph<usize, f64> (node=index, edge=weight).
     let mut graph: UnGraph<usize, f64> = UnGraph::new_undirected();
@@ -100,13 +116,13 @@ pub fn compute_centrality(adj: &Array2<f64>, labels: &[String]) -> CentralityRep
     let weighted_adj = weighted_adjacency(&graph, &nodes);
     let betweenness = parallel_brandes_betweenness(&weighted_adj, n);
 
-    CentralityReport {
+    Ok(CentralityReport {
         labels: labels.to_vec(),
         degree,
         distance,
         closeness,
         betweenness,
-    }
+    })
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -255,7 +271,7 @@ mod tests {
                 }
             }
         }
-        let report = compute_centrality(&adj, &labels(n));
+        let report = compute_centrality(&adj, &labels(n)).expect("centrality should compute");
         for &d in &report.degree {
             assert!((d - 1.0).abs() < 1e-10, "degree={}", d);
         }
@@ -270,7 +286,7 @@ mod tests {
             adj[[i, i + 1]] = 1.0;
             adj[[i + 1, i]] = 1.0;
         }
-        let report = compute_centrality(&adj, &labels(n));
+        let report = compute_centrality(&adj, &labels(n)).expect("centrality should compute");
         let max_idx = report
             .betweenness
             .iter()
@@ -289,7 +305,7 @@ mod tests {
         for i in 0..n {
             adj[[i, i]] = 0.0;
         }
-        let report = compute_centrality(&adj, &labels(n));
+        let report = compute_centrality(&adj, &labels(n)).expect("centrality should compute");
         for &c in &report.closeness {
             assert!(c > 0.0, "closeness={}", c);
         }
@@ -306,9 +322,16 @@ mod tests {
         adj[[0, 2]] = 0.4;
         adj[[2, 0]] = 0.4;
 
-        let report = compute_centrality(&adj, &labels(n));
+        let report = compute_centrality(&adj, &labels(n)).expect("centrality should compute");
 
         assert!(report.betweenness[1] > report.betweenness[0]);
         assert!(report.betweenness[1] > report.betweenness[2]);
+    }
+
+    #[test]
+    fn test_centrality_rejects_dimension_mismatch() {
+        let adj = Array2::<f64>::zeros((2, 3));
+        let err = compute_centrality(&adj, &labels(2)).expect_err("non-square adjacency must fail");
+        assert!(err.to_string().contains("square"));
     }
 }

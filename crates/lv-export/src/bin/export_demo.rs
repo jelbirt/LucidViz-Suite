@@ -258,7 +258,7 @@ fn main() -> Result<()> {
         output_dir: out_dir.clone(),
         filename_prefix: "trade_demo".to_string(),
         start_frame: 0,
-        end_frame: buffer.frames.len().saturating_sub(1) as u32,
+        end_frame: buffer.total_frames.saturating_sub(1),
         width: 1280,
         height: 720,
         format: ImageFormat::Png,
@@ -268,8 +268,9 @@ fn main() -> Result<()> {
 
     // capture_sequence is synchronous inside; run it on a thread so we can
     // drain the progress channel without deadlocking.
-    let handle =
-        std::thread::spawn(move || capture_sequence(&ctx, &buffer, &camera, &seq_cfg, &tx));
+    let handle = std::thread::spawn(move || {
+        capture_sequence(&ctx, &dataset, &lis_config, &buffer, &camera, &seq_cfg, &tx)
+    });
 
     let mut last_pct = 0u32;
     for pct in rx {

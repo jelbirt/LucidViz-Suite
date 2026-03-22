@@ -380,7 +380,7 @@ impl AsPanel {
                 pct: 0.2,
             });
 
-            let input = build_mf_distance_input(
+            let input = match build_mf_distance_input(
                 &output,
                 mds_config,
                 procrustes_mode,
@@ -388,7 +388,13 @@ impl AsPanel {
                 normalize,
                 normalization_mode,
                 target_range,
-            );
+            ) {
+                Ok(input) => input,
+                Err(e) => {
+                    let _ = tx.send(PipelineEvent::Done(Err(e.to_string())));
+                    return;
+                }
+            };
 
             match run_distance_pipeline(&input) {
                 Ok(result) => {
@@ -431,7 +437,7 @@ impl AsPanel {
                 pct: 0.2,
             });
 
-            let input = mf_series_output_to_as_input(
+            let input = match mf_series_output_to_as_input(
                 &output,
                 MfSeriesAsInputOptions {
                     mds_config,
@@ -442,7 +448,13 @@ impl AsPanel {
                     target_range,
                     procrustes_scale: true,
                 },
-            );
+            ) {
+                Ok(input) => input,
+                Err(e) => {
+                    let _ = tx.send(PipelineEvent::Done(Err(e.to_string())));
+                    return;
+                }
+            };
 
             match run_distance_pipeline(&input) {
                 Ok(result) => {
@@ -472,15 +484,19 @@ fn build_mf_distance_input(
     normalize: bool,
     normalization_mode: NormalizationMode,
     target_range: f64,
-) -> AsDistancePipelineInput {
+) -> Result<AsDistancePipelineInput, String> {
+    mf_output
+        .validate()
+        .map_err(|e| format!("Invalid MatrixForge output: {e}"))?;
     let se = mf_output_to_distance_matrix(
         mf_output.labels.clone(),
         &mf_output.similarity_matrix,
         mf_output.n,
         mf_output.sim_to_dist,
-    );
+    )
+    .map_err(|e| e.to_string())?;
 
-    AsDistancePipelineInput {
+    Ok(AsDistancePipelineInput {
         datasets: vec![("MatrixForge".to_string(), se)],
         mds_config,
         procrustes_mode,
@@ -489,7 +505,7 @@ fn build_mf_distance_input(
         normalization_mode,
         target_range,
         procrustes_scale: true,
-    }
+    })
 }
 
 fn collect_dataset_labels(ds: &EtvDataset) -> Vec<String> {
@@ -712,7 +728,8 @@ mod tests {
             true,
             NormalizationMode::Independent,
             300.0,
-        );
+        )
+        .expect("valid MF output should convert");
 
         assert_eq!(input.datasets.len(), 1);
         assert_eq!(input.datasets[0].0, "MatrixForge");
@@ -730,7 +747,8 @@ mod tests {
                 3,
                 0.0,
                 MdsAlgorithm::Classical,
-            )],
+            )
+            .expect("test coordinates should build")],
             procrustes: vec![ProcrustesResult {
                 aligned: MdsCoordinates::new(
                     vec!["alpha".into()],
@@ -738,7 +756,8 @@ mod tests {
                     3,
                     0.0,
                     MdsAlgorithm::Classical,
-                ),
+                )
+                .expect("test coordinates should build"),
                 rotation: vec![1.0, 0.0, 0.0, 1.0],
                 scale: 1.0,
                 translation: vec![0.0, 0.0],
@@ -748,7 +767,8 @@ mod tests {
                 labels: vec!["alpha".into()],
                 reason: "distance-only".into(),
             }],
-            distance_matrices: vec![DistanceMatrix::new(vec!["alpha".into()], vec![0.0])],
+            distance_matrices: vec![DistanceMatrix::new(vec!["alpha".into()], vec![0.0])
+                .expect("test distance matrix should build")],
             etv_dataset: EtvDataset {
                 source_path: None,
                 sheets: vec![EtvSheet {
@@ -789,5 +809,38 @@ mod tests {
         assert!(!dataset_json.contains("\"procrustes\""));
 
         let _ = std::fs::remove_dir_all(out_dir);
+    }
+
+    #[test]
+    fn build_mf_distance_input_rejects_invalid_shape() {
+        let mf_output = MfOutput {
+            labels: vec!["alpha".into(), "beta".into()],
+            similarity_matrix: vec![1.0, 0.25, 0.25],
+            sim_to_dist: SimToDistMethod::Linear,
+            nppmi_matrix: vec![1.0, 0.25, 0.25, 1.0],
+            raw_counts: vec![0; 4],
+            ppmi_matrix: vec![0.0; 4],
+            n: 2,
+            centrality: CentralityReport {
+                labels: vec!["alpha".into(), "beta".into()],
+                degree: vec![0.0; 2],
+                distance: vec![0.0; 2],
+                closeness: vec![0.0; 2],
+                betweenness: vec![0.0; 2],
+            },
+        };
+
+        let err = build_mf_distance_input(
+            &mf_output,
+            MdsConfig::Classical,
+            ProcrustesMode::None,
+            MdsDimMode::Fixed(3),
+            true,
+            NormalizationMode::Independent,
+            300.0,
+        )
+        .expect_err("invalid MF output must fail");
+
+        assert!(err.contains("similarity_matrix expected 4 values"));
     }
 }

@@ -16,6 +16,13 @@ pub enum DataError {
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
 
+    #[error("input '{path}' is {bytes} bytes, exceeding limit of {limit} bytes")]
+    FileTooLarge {
+        path: String,
+        bytes: u64,
+        limit: u64,
+    },
+
     // ── Structure ────────────────────────────────────────────────────────────
     #[error("workbook has no sheets")]
     NoSheets,
@@ -37,6 +44,14 @@ pub enum DataError {
         col: usize,
         expected: &'static str,
         actual: String,
+    },
+
+    #[error("sheet '{sheet}' row {row} col {col}: {msg}")]
+    ValueOutOfRange {
+        sheet: String,
+        row: usize,
+        col: usize,
+        msg: String,
     },
 
     // ── Validation ───────────────────────────────────────────────────────────

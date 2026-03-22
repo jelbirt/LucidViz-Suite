@@ -49,6 +49,10 @@ mod inner {
 
     impl ExportPanel {
         pub fn show(&mut self, ui: &mut egui::Ui, state: &AppState) {
+            ui.label("Export integration is not wired into `lv-app` yet.");
+            ui.small("The `lv-export` crate and export demo work, but this GUI panel is currently informational only.");
+            ui.separator();
+
             // Poll background results
             if self.running {
                 if let Some(rx) = &self.prog_rx {
@@ -68,91 +72,72 @@ mod inner {
                 }
             }
 
-            ui.label("Output directory:");
-            ui.horizontal(|ui| {
-                ui.text_edit_singleline(&mut self.output_dir);
-                if ui.button("Browse…").clicked() {
-                    if let Some(p) = rfd::FileDialog::new().pick_folder() {
-                        self.output_dir = p.to_string_lossy().into_owned();
-                    }
-                }
-            });
+            ui.add_enabled_ui(false, |ui| {
+                ui.label("Output directory:");
+                ui.horizontal(|ui| {
+                    ui.text_edit_singleline(&mut self.output_dir);
+                    let _ = ui.button("Browse...");
+                });
 
-            ui.horizontal(|ui| {
-                ui.label("Prefix:");
-                ui.text_edit_singleline(&mut self.filename_prefix);
-            });
+                ui.horizontal(|ui| {
+                    ui.label("Prefix:");
+                    ui.text_edit_singleline(&mut self.filename_prefix);
+                });
 
-            ui.horizontal(|ui| {
-                ui.label("Start frame:");
-                ui.add(egui::DragValue::new(&mut self.start_frame));
-                ui.label("End:");
-                ui.add(egui::DragValue::new(&mut self.end_frame));
-            });
+                ui.horizontal(|ui| {
+                    ui.label("Start frame:");
+                    ui.add(egui::DragValue::new(&mut self.start_frame));
+                    ui.label("End:");
+                    ui.add(egui::DragValue::new(&mut self.end_frame));
+                });
 
-            ui.horizontal(|ui| {
-                ui.label("Width:");
-                ui.add(egui::DragValue::new(&mut self.width).range(64..=7680));
-                ui.label("Height:");
-                ui.add(egui::DragValue::new(&mut self.height).range(64..=4320));
-            });
+                ui.horizontal(|ui| {
+                    ui.label("Width:");
+                    ui.add(egui::DragValue::new(&mut self.width).range(64..=7680));
+                    ui.label("Height:");
+                    ui.add(egui::DragValue::new(&mut self.height).range(64..=4320));
+                });
 
-            ui.checkbox(&mut self.format_png, "PNG (uncheck for TGA)");
+                ui.checkbox(&mut self.format_png, "PNG (uncheck for TGA)");
 
-            ui.separator();
-
-            // Single-frame export (sync)
-            let can_export = state.lis_buffer.is_some() && !self.running;
-            ui.add_enabled_ui(can_export, |ui| {
-                if ui.button("Export current frame (PNG)").clicked() {
-                    if let Some(ref buf) = state.lis_buffer {
-                        let idx = state.slice_index as usize;
-                        let frame = buf.frames.get(idx).cloned();
-                        let dir = PathBuf::from(&self.output_dir);
-                        let pfx = self.filename_prefix.clone();
-
-                        if let Some(frame) = frame {
-                            // Save via image::RgbaImage stub — we build a placeholder
-                            // white 1×1 image since the real GPU capture requires ctx.
-                            // The full implementation is wired in lv-app/main.rs.
-                            let _ = (frame, dir, pfx);
-                            self.last_msg =
-                                Some("Single-frame export: wire capture_frame from lv-app.".into());
-                        }
-                    }
-                }
-            });
-
-            // Sequence export (background)
-            ui.add_enabled_ui(can_export, |ui| {
-                if ui.button("Export sequence…").clicked() {
-                    self.last_msg =
-                        Some("Sequence export: wire capture_sequence from lv-app.".into());
-                    // Full wiring is done in lv-app/main.rs where WgpuContext is available.
-                }
-            });
-
-            // Video-export controls are only compiled when the video-export
-            // sub-feature is active.
-            #[cfg(feature = "video-export")]
-            {
                 ui.separator();
-                ui.horizontal(|ui| {
-                    ui.label("FPS:");
-                    ui.add(egui::DragValue::new(&mut self.fps).range(1..=120));
-                    ui.label("CRF:");
-                    ui.add(egui::DragValue::new(&mut self.crf).range(0..=51));
-                });
-                ui.horizontal(|ui| {
-                    ui.label("Codec:");
-                    ui.text_edit_singleline(&mut self.codec);
-                });
+
+                // Single-frame export (sync)
+                let can_export = state.lis_buffer.is_some() && !self.running;
                 ui.add_enabled_ui(can_export, |ui| {
-                    if ui.button("Export video (requires ffmpeg)…").clicked() {
-                        self.last_msg = Some("Video export: wire export_video from lv-app.".into());
-                    }
+                    let _ = ui.button("Export current frame (PNG)");
                 });
-            }
+
+                // Sequence export (background)
+                ui.add_enabled_ui(can_export, |ui| {
+                    let _ = ui.button("Export sequence...");
+                });
+
+                // Video-export controls are only compiled when the video-export
+                // sub-feature is active.
+                #[cfg(feature = "video-export")]
+                {
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        ui.label("FPS:");
+                        ui.add(egui::DragValue::new(&mut self.fps).range(1..=120));
+                        ui.label("CRF:");
+                        ui.add(egui::DragValue::new(&mut self.crf).range(0..=51));
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Codec:");
+                        ui.text_edit_singleline(&mut self.codec);
+                    });
+                    ui.add_enabled_ui(can_export, |ui| {
+                        let _ = ui.button("Export video (requires ffmpeg)...");
+                    });
+                }
+            });
+
+            let _ = (&state.lis_buffer, PathBuf::from(&self.output_dir));
+            self.last_msg.get_or_insert_with(|| {
+                "Not available in the desktop app yet; use `cargo run -p lv-export --bin export_demo` for a working export flow.".into()
+            });
 
             // Progress / status
             if self.running {

@@ -66,8 +66,7 @@ fn write_coordinates_xlsx(coords: &[MdsCoordinates], path: &Path) -> Result<()> 
         }
     }
 
-    wb.save(path)
-        .map_err(|e| crate::error::AsError::Xlsx(e.to_string()))?;
+    save_workbook_atomic(&mut wb, path)?;
     Ok(())
 }
 
@@ -118,8 +117,7 @@ fn write_centralities_xlsx(reports: &[CentralityState], path: &Path) -> Result<(
         }
     }
 
-    wb.save(path)
-        .map_err(|e| crate::error::AsError::Xlsx(e.to_string()))?;
+    save_workbook_atomic(&mut wb, path)?;
     Ok(())
 }
 
@@ -142,7 +140,42 @@ fn write_as_json(result: &AsPipelineResult, path: &Path) -> Result<()> {
     };
 
     let json = serde_json::to_string_pretty(&jr)?;
-    std::fs::write(path, json)?;
+    atomic_write(path, json.as_bytes())?;
+    Ok(())
+}
+
+fn save_workbook_atomic(wb: &mut Workbook, path: &Path) -> Result<()> {
+    let tmp_path = temp_path(path)?;
+    wb.save(&tmp_path)
+        .map_err(|e| crate::error::AsError::Xlsx(e.to_string()))?;
+    replace_file(&tmp_path, path)?;
+    Ok(())
+}
+
+fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
+    let tmp_path = temp_path(path)?;
+    std::fs::write(&tmp_path, bytes)?;
+    replace_file(&tmp_path, path)?;
+    Ok(())
+}
+
+fn temp_path(path: &Path) -> Result<std::path::PathBuf> {
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .context("path must have file name")?;
+    Ok(path.with_file_name(format!(".{file_name}.tmp-{}", std::process::id())))
+}
+
+fn replace_file(tmp_path: &Path, path: &Path) -> Result<()> {
+    if let Err(err) = std::fs::rename(tmp_path, path) {
+        if path.exists() {
+            let _ = std::fs::remove_file(path);
+            std::fs::rename(tmp_path, path)?;
+        } else {
+            return Err(err.into());
+        }
+    }
     Ok(())
 }
 
@@ -165,7 +198,8 @@ mod tests {
                 2,
                 0.0,
                 MdsAlgorithm::Classical,
-            )],
+            )
+            .expect("test coordinates should build")],
             procrustes: vec![ProcrustesResult {
                 aligned: MdsCoordinates::new(
                     vec!["alpha".into()],
@@ -173,7 +207,8 @@ mod tests {
                     2,
                     0.0,
                     MdsAlgorithm::Classical,
-                ),
+                )
+                .expect("test coordinates should build"),
                 rotation: vec![1.0, 0.0, 0.0, 1.0],
                 scale: 1.0,
                 translation: vec![0.0, 0.0],
@@ -183,7 +218,8 @@ mod tests {
                 labels: vec!["alpha".into()],
                 reason: "none".into(),
             }],
-            distance_matrices: vec![DistanceMatrix::new(vec!["alpha".into()], vec![0.0])],
+            distance_matrices: vec![DistanceMatrix::new(vec!["alpha".into()], vec![0.0])
+                .expect("test distance matrix should build")],
             etv_dataset: EtvDataset {
                 source_path: None,
                 sheets: vec![],

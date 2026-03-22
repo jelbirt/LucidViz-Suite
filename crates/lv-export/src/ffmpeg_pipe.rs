@@ -10,9 +10,10 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc;
 
 use anyhow::{bail, Context as _, Result};
-use lv_data::LisBuffer;
+use lv_data::{EtvDataset, LisBuffer, LisConfig};
 use lv_renderer::{ArcballCamera, WgpuContext};
 
+use crate::sequence::export_frame;
 use crate::snapshot::capture_frame;
 
 // ── types ─────────────────────────────────────────────────────────────────────
@@ -45,6 +46,8 @@ impl Default for VideoConfig {
 #[allow(clippy::too_many_arguments)]
 pub fn export_video(
     ctx: &WgpuContext,
+    dataset: &EtvDataset,
+    lis_config: &LisConfig,
     buffer: &LisBuffer,
     camera: &ArcballCamera,
     width: u32,
@@ -96,16 +99,24 @@ pub fn export_video(
         .context("spawn ffmpeg")?;
 
     let stdin = ffmpeg.stdin.as_mut().context("ffmpeg stdin")?;
-    let end = end_frame.min(buffer.frames.len().saturating_sub(1) as u32);
+    if buffer.total_frames == 0 {
+        bail!("export_video requires at least one frame");
+    }
+
+    let end = end_frame.min(buffer.total_frames.saturating_sub(1));
+    if start_frame > end {
+        bail!(
+            "export_video start_frame {} is out of range for {} total frames",
+            start_frame,
+            buffer.total_frames
+        );
+    }
     let total = (end + 1).saturating_sub(start_frame).max(1) as f32;
 
     for frame_idx in start_frame..=end {
-        let frame = buffer
-            .frames
-            .get(frame_idx as usize)
-            .with_context(|| format!("frame {frame_idx} out of range"))?;
+        let frame = export_frame(dataset, lis_config, buffer, frame_idx)?;
 
-        let img = capture_frame(ctx, frame, camera, width, height)
+        let img = capture_frame(ctx, &frame, camera, width, height)
             .with_context(|| format!("capture_frame {frame_idx}"))?;
 
         // Write raw RGBA bytes directly to ffmpeg stdin

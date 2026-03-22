@@ -108,7 +108,7 @@ fn sha256_hex(data: &[u8]) -> String {
     format!("{:x}", h.finalize())
 }
 
-/// Load or create the golden-hashes store.
+/// Load the golden-hashes store.
 /// Keys are strings like `"frame_{idx}"`.
 fn load_golden(path: &Path) -> HashMap<String, String> {
     if path.exists() {
@@ -117,12 +117,6 @@ fn load_golden(path: &Path) -> HashMap<String, String> {
     } else {
         HashMap::new()
     }
-}
-
-/// Write the golden-hashes store atomically.
-fn save_golden(path: &Path, hashes: &HashMap<String, String>) {
-    let s = toml::to_string(hashes).expect("serialise golden hashes");
-    std::fs::write(path, s).expect("write golden_hashes.toml");
 }
 
 #[test]
@@ -193,8 +187,8 @@ fn migration_dataset_lis_buffer_60_frames() {
 
 /// Phase 9 — golden-hash assertions across 5 key frames.
 ///
-/// First run: writes `tests/integration/golden_hashes.toml`.
-/// Subsequent runs: asserts hashes match.
+/// Asserts hashes match the checked-in goldens in
+/// `tests/integration/golden_hashes.toml`.
 #[test]
 fn migration_dataset_golden_hashes() {
     let dataset = make_migration_dataset();
@@ -216,7 +210,12 @@ fn migration_dataset_golden_hashes() {
         })
         .expect("could not compute golden_hashes.toml path");
 
-    let mut stored = load_golden(&golden_path);
+    let stored = load_golden(&golden_path);
+    assert!(
+        !stored.is_empty(),
+        "missing golden hashes at {:?}; regenerate them explicitly instead of seeding during test runs",
+        golden_path
+    );
     let (width, height) = (256u32, 256u32);
 
     let key_frames = [0usize, 15, 30, 45, 59];
@@ -234,25 +233,15 @@ fn migration_dataset_golden_hashes() {
         computed.insert(format!("frame_{idx}"), hash);
     }
 
-    if stored.is_empty() {
-        // First run: seed the golden file.
-        for (k, v) in &computed {
-            stored.insert(k.clone(), v.clone());
-        }
-        save_golden(&golden_path, &stored);
-        println!("Golden hashes written to {golden_path:?}");
-    } else {
-        // Subsequent runs: assert hashes match.
-        for &idx in &key_frames {
-            let key = format!("frame_{idx}");
-            let expected = stored
-                .get(&key)
-                .unwrap_or_else(|| panic!("Missing golden hash for {key}"));
-            let actual = computed.get(&key).unwrap();
-            assert_eq!(
-                actual, expected,
-                "Golden hash mismatch at {key}: expected {expected}, got {actual}"
-            );
-        }
+    for &idx in &key_frames {
+        let key = format!("frame_{idx}");
+        let expected = stored
+            .get(&key)
+            .unwrap_or_else(|| panic!("Missing golden hash for {key}"));
+        let actual = computed.get(&key).unwrap();
+        assert_eq!(
+            actual, expected,
+            "Golden hash mismatch at {key}: expected {expected}, got {actual}"
+        );
     }
 }

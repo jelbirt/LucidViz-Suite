@@ -35,14 +35,18 @@ from version control; users can recreate outputs locally from the sample data.
 | Rust + Cargo | 1.78 (stable) |
 | `wgpu`-compatible GPU | Vulkan, Metal, or DX12 |
 
-On **Linux** you additionally need the Vulkan loader and development headers:
+On **Linux** you additionally need the Vulkan loader plus the same native dev
+packages used in CI for audio/windowing builds:
 
 ```bash
 # Debian / Ubuntu
-sudo apt-get install libvulkan-dev vulkan-tools
+sudo apt-get install libvulkan-dev vulkan-tools \
+                     libasound2-dev libxkbcommon-dev \
+                     libwayland-dev libxrandr-dev libxi-dev
 
 # Fedora / RHEL
-sudo dnf install vulkan-loader-devel
+sudo dnf install vulkan-loader-devel alsa-lib-devel libxkbcommon-devel \
+                 wayland-devel libXrandr-devel libXi-devel
 ```
 
 On **Windows** a DX12-capable GPU and driver are sufficient (no extra installs).
@@ -94,11 +98,11 @@ cargo bench -p lv-renderer
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `audio` | ✅ | MIDI audio engine via `lv-audio` |
+| `audio` | ✅ | Builds the `lv-audio` backend and GUI panel scaffolding; live MIDI runtime wiring in `lv-app` is still incomplete |
 | `midi` | ❌ | Adds live MIDI-device output (implies `audio`) |
-| `export` | ✅ | PNG/video export via `lv-export` |
+| `export` | ✅ | Builds the `lv-export` crate and demo tooling; the desktop GUI export panel is not fully wired into `lv-app` yet |
 | `native-io` | ✅ | XLSX/JSON file I/O |
-| `wasm` | ❌ | WASM32 compilation scaffold |
+| `wasm` | ❌ | Reserved scaffold flag; `lv-app` is not currently shipped for `wasm32-unknown-unknown` |
 
 ### `lv-data`
 
@@ -113,11 +117,18 @@ cargo bench -p lv-renderer
 rustup target add wasm32-unknown-unknown
 cargo build --target wasm32-unknown-unknown \
             --no-default-features --features wasm \
-            -p lv-data -p as-pipeline -p mf-pipeline
+            -p lv-data
 ```
 
-> **Note:** The WASM build is a scaffold only.  The full GPU renderer requires a
-> WebGPU backend not yet wired in this release.
+> **Note:** Only `lv-data`'s no-I/O schema layer is CI-checked for `wasm32-unknown-unknown` right now.
+> `as-pipeline`, `mf-pipeline`, and `lv-app` still expose placeholder `wasm` flags, but their full
+> dependency stack is not yet supported as a shipped WASM target in this release.
+
+## Current runtime status
+
+- `lv-export` has working library/demo paths, but the desktop app's Export panel is currently disabled pending full `lv-app` integration.
+- `lv-audio` contains the MIDI backend, but the desktop app's Audio / MIDI panel is currently informational and not connected to a live runtime engine.
+- Session persistence helpers exist in `crates/lv-app/src/session.rs`, but save/load session UI is not yet exposed in the desktop app.
 
 ## Native installer
 

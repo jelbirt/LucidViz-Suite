@@ -10,7 +10,7 @@ publish.workspace = true
 [features]
 default   = []
 native-io = []   # gate file I/O
-wasm      = []   # wasm32-unknown-unknown compatibility
+wasm      = ["dep:getrandom"]   # wasm32-unknown-unknown compatibility
 
 [dependencies]
 lv-data.path     = "../lv-data"
@@ -27,6 +27,7 @@ rust_xlsxwriter.workspace       = true
 anyhow.workspace                = true
 thiserror.workspace             = true
 num_cpus.workspace        = true
+getrandom = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = "3"

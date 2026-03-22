@@ -1,5 +1,6 @@
 //! Core types for the MatrixForge pipeline.
 
+use anyhow::{bail, Result};
 use as_pipeline::types::CentralityReport;
 pub use lv_data::SimToDistMethod;
 use serde::{Deserialize, Serialize};
@@ -152,6 +153,37 @@ pub struct MfOutput {
     pub centrality: CentralityReport,
 }
 
+impl MfOutput {
+    pub fn validate(&self) -> Result<()> {
+        if self.labels.len() != self.n {
+            bail!(
+                "MF output label count {} does not match declared size {}",
+                self.labels.len(),
+                self.n
+            );
+        }
+
+        validate_square_len("similarity_matrix", self.similarity_matrix.len(), self.n)?;
+        validate_square_len("nppmi_matrix", self.nppmi_matrix.len(), self.n)?;
+        validate_square_len("ppmi_matrix", self.ppmi_matrix.len(), self.n)?;
+        validate_square_len("raw_counts", self.raw_counts.len(), self.n)?;
+
+        if self.centrality.labels.len() != self.n
+            || self.centrality.degree.len() != self.n
+            || self.centrality.distance.len() != self.n
+            || self.centrality.closeness.len() != self.n
+            || self.centrality.betweenness.len() != self.n
+        {
+            bail!(
+                "MF output centrality vectors do not match declared size {}",
+                self.n
+            );
+        }
+
+        Ok(())
+    }
+}
+
 /// One slice in a temporal/comparative MatrixForge series.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MfSlice {
@@ -169,6 +201,25 @@ pub struct MfSeriesOutput {
     pub labels: Vec<String>,
     pub sim_to_dist: SimToDistMethod,
     pub slices: Vec<MfSlice>,
+}
+
+impl MfSeriesOutput {
+    pub fn validate(&self) -> Result<()> {
+        for slice in &self.slices {
+            slice.output.validate()?;
+        }
+        Ok(())
+    }
+}
+
+fn validate_square_len(name: &str, len: usize, n: usize) -> Result<()> {
+    let expected = n
+        .checked_mul(n)
+        .ok_or_else(|| anyhow::anyhow!("MF output size overflow for {} labels", n))?;
+    if len != expected {
+        bail!("MF output {name} expected {expected} values for {n} labels, got {len}");
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

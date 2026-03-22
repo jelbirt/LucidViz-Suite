@@ -181,24 +181,26 @@ pub struct MfSeriesAsInputOptions {
 pub fn mf_series_output_to_as_input(
     output: &MfSeriesOutput,
     options: MfSeriesAsInputOptions,
-) -> AsDistancePipelineInput {
+) -> Result<AsDistancePipelineInput> {
+    output.validate()?;
     let datasets = output
         .slices
         .iter()
         .map(|slice| {
-            (
+            Ok((
                 slice.label.clone(),
                 mf_output_to_distance_matrix(
                     slice.output.labels.clone(),
                     &slice.output.similarity_matrix,
                     slice.output.n,
                     slice.output.sim_to_dist,
-                ),
-            )
+                )
+                .map_err(|e| anyhow::anyhow!(e))?,
+            ))
         })
-        .collect();
+        .collect::<Result<Vec<_>>>()?;
 
-    AsDistancePipelineInput {
+    Ok(AsDistancePipelineInput {
         datasets,
         mds_config: options.mds_config,
         procrustes_mode: options.procrustes_mode,
@@ -207,7 +209,7 @@ pub fn mf_series_output_to_as_input(
         normalization_mode: options.normalization_mode,
         target_range: options.target_range,
         procrustes_scale: options.procrustes_scale,
-    }
+    })
 }
 
 #[derive(Debug, Clone)]

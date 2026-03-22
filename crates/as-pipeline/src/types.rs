@@ -1,5 +1,6 @@
 //! Core types for the AlignSpace pipeline.
 
+use crate::error::AsError;
 use lv_data::schema::EtvDataset;
 use ndarray::Array2;
 use serde::{Deserialize, Serialize};
@@ -18,10 +19,17 @@ pub struct DistanceMatrix {
 }
 
 impl DistanceMatrix {
-    pub fn new(labels: Vec<String>, data: Vec<f64>) -> Self {
+    pub fn new(labels: Vec<String>, data: Vec<f64>) -> Result<Self, AsError> {
         let n = labels.len();
-        assert_eq!(data.len(), n * n, "DistanceMatrix data length mismatch");
-        DistanceMatrix { labels, data, n }
+        if data.len() != n * n {
+            return Err(AsError::DimensionMismatch(format!(
+                "DistanceMatrix expected {} values for {} labels, got {}",
+                n * n,
+                n,
+                data.len()
+            )));
+        }
+        Ok(DistanceMatrix { labels, data, n })
     }
 
     #[inline]
@@ -61,17 +69,25 @@ impl MdsCoordinates {
         dims: usize,
         stress: f64,
         algorithm: MdsAlgorithm,
-    ) -> Self {
+    ) -> Result<Self, AsError> {
         let n = labels.len();
-        assert_eq!(data.len(), n * dims, "MdsCoordinates data length mismatch");
-        MdsCoordinates {
+        if data.len() != n * dims {
+            return Err(AsError::DimensionMismatch(format!(
+                "MdsCoordinates expected {} values for {} labels across {} dims, got {}",
+                n * dims,
+                n,
+                dims,
+                data.len()
+            )));
+        }
+        Ok(MdsCoordinates {
             labels,
             data,
             n,
             dims,
             stress,
             algorithm,
-        }
+        })
     }
 
     #[inline]

@@ -16,6 +16,8 @@ use lv_gui::EgoEdgeDirection;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+const MAX_SESSION_BYTES: u64 = 16 * 1024 * 1024;
+
 // ── SessionSnapshot ───────────────────────────────────────────────────────────
 
 /// Serialisable snapshot of application state (no GPU handles).
@@ -134,17 +136,49 @@ pub fn save_session(snapshot: &SessionSnapshot) -> Result<()> {
     let dir = path.parent().expect("session path has parent");
     std::fs::create_dir_all(dir).with_context(|| format!("create sessions dir {:?}", dir))?;
     let json = serde_json::to_string_pretty(snapshot).context("serialise session")?;
-    std::fs::write(&path, json).with_context(|| format!("write session {:?}", path))?;
+    atomic_write(&path, json.as_bytes()).with_context(|| format!("write session {:?}", path))?;
     Ok(())
 }
 
 /// Load a saved session by name.
 pub fn load_session(name: &str) -> Result<SessionSnapshot> {
     let path = session_path(name).context("cannot determine home directory")?;
-    let bytes = std::fs::read(&path).with_context(|| format!("read session {:?}", path))?;
+    let bytes = read_bounded_file(&path, MAX_SESSION_BYTES)
+        .with_context(|| format!("read session {:?}", path))?;
     let snapshot: SessionSnapshot =
         serde_json::from_slice(&bytes).with_context(|| format!("parse session {:?}", path))?;
     Ok(snapshot)
+}
+
+fn read_bounded_file(path: &std::path::Path, limit: u64) -> Result<Vec<u8>> {
+    let metadata = std::fs::metadata(path)?;
+    if metadata.len() > limit {
+        anyhow::bail!(
+            "session file '{}' is {} bytes, exceeding limit of {} bytes",
+            path.display(),
+            metadata.len(),
+            limit
+        );
+    }
+    Ok(std::fs::read(path)?)
+}
+
+fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .context("path must have file name")?;
+    let tmp_path = path.with_file_name(format!(".{file_name}.tmp-{}", std::process::id()));
+    std::fs::write(&tmp_path, bytes)?;
+    if let Err(err) = std::fs::rename(&tmp_path, path) {
+        if path.exists() {
+            let _ = std::fs::remove_file(path);
+            std::fs::rename(&tmp_path, path)?;
+        } else {
+            return Err(err.into());
+        }
+    }
+    Ok(())
 }
 
 /// List all saved session names (stem of each `*.json` in the sessions dir).
@@ -262,5 +296,14 @@ mod tests {
         let snap2: SessionSnapshot = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(snap2.name, "demo");
         assert_eq!(snap2.lis_config.lis_value, 30);
+    }
+
+    #[test]
+    fn bounded_session_read_rejects_oversized_files() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("oversized.json");
+        std::fs::write(&path, vec![b'x'; 32]).unwrap();
+        let err = read_bounded_file(&path, 8).expect_err("oversized session should fail");
+        assert!(format!("{err:#}").contains("exceeding limit"));
     }
 }

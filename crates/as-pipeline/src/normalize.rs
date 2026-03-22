@@ -50,6 +50,7 @@ mod tests {
         let n = data.len() / dims;
         let labels: Vec<String> = (0..n).map(|i| format!("n{}", i)).collect();
         MdsCoordinates::new(labels, data, dims, 0.0, MdsAlgorithm::Classical)
+            .expect("test coordinates should build")
     }
 
     #[test]

@@ -7,6 +7,13 @@ pub enum MfError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
+    #[error("input '{path}' is {bytes} bytes, exceeding limit of {limit} bytes")]
+    FileTooLarge {
+        path: String,
+        bytes: u64,
+        limit: u64,
+    },
+
     #[error("Empty corpus: no text was ingested")]
     EmptyCorpus,
 

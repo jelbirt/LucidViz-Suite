@@ -4,6 +4,8 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+const MAX_PREFS_BYTES: u64 = 4 * 1024 * 1024;
+
 // ── UserPreferences ────────────────────────────────────────────────────────────
 
 /// Persistent user preferences written to `~/.lucid-viz/prefs.json`.
@@ -69,7 +71,8 @@ impl UserPreferences {
 
     fn try_load() -> Result<Self> {
         let path = Self::prefs_path().context("cannot determine home directory")?;
-        let bytes = std::fs::read(&path).with_context(|| format!("read {:?}", path))?;
+        let bytes = read_bounded_file(&path, MAX_PREFS_BYTES)
+            .with_context(|| format!("read {:?}", path))?;
         let prefs: Self =
             serde_json::from_slice(&bytes).with_context(|| format!("parse {:?}", path))?;
         Ok(prefs)
@@ -79,7 +82,7 @@ impl UserPreferences {
     pub fn save(&self) -> Result<()> {
         let path = Self::ensure_dir()?;
         let json = serde_json::to_string_pretty(self).context("serialise preferences")?;
-        std::fs::write(&path, json).with_context(|| format!("write {:?}", path))?;
+        atomic_write(&path, json.as_bytes()).with_context(|| format!("write {:?}", path))?;
         Ok(())
     }
 
@@ -90,6 +93,37 @@ impl UserPreferences {
         self.recent_files.insert(0, path);
         self.recent_files.truncate(10);
     }
+}
+
+fn read_bounded_file(path: &std::path::Path, limit: u64) -> Result<Vec<u8>> {
+    let metadata = std::fs::metadata(path)?;
+    if metadata.len() > limit {
+        anyhow::bail!(
+            "prefs file '{}' is {} bytes, exceeding limit of {} bytes",
+            path.display(),
+            metadata.len(),
+            limit
+        );
+    }
+    Ok(std::fs::read(path)?)
+}
+
+fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .context("path must have file name")?;
+    let tmp_path = path.with_file_name(format!(".{file_name}.tmp-{}", std::process::id()));
+    std::fs::write(&tmp_path, bytes)?;
+    if let Err(err) = std::fs::rename(&tmp_path, path) {
+        if path.exists() {
+            let _ = std::fs::remove_file(path);
+            std::fs::rename(&tmp_path, path)?;
+        } else {
+            return Err(err.into());
+        }
+    }
+    Ok(())
 }
 
 // ── tests ──────────────────────────────────────────────────────────────────────
@@ -120,5 +154,14 @@ mod tests {
         p.push_recent(p.recent_files[5].clone());
         assert_eq!(p.recent_files.len(), 10, "still capped after dedup");
         assert_ne!(p.recent_files[0], top, "moved to front");
+    }
+
+    #[test]
+    fn bounded_prefs_read_rejects_oversized_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("prefs.json");
+        std::fs::write(&path, vec![b'x'; 32]).unwrap();
+        let err = read_bounded_file(&path, 8).expect_err("oversized prefs should fail");
+        assert!(format!("{err:#}").contains("exceeding limit"));
     }
 }

@@ -51,50 +51,53 @@ mod inner {
         pub fn show(&mut self, ui: &mut egui::Ui, _state: &mut AppState) {
             ui.heading("MIDI / Audio");
             ui.separator();
-
-            if ui.button("Refresh ports").clicked() {
-                self.refresh_ports();
-            }
-
-            if self.ports.is_empty() {
-                ui.label("No MIDI ports found.");
-            } else {
-                egui::ComboBox::from_label("Port")
-                    .selected_text(&self.selected_port)
-                    .show_ui(ui, |ui| {
-                        for port in &self.ports {
-                            ui.selectable_value(&mut self.selected_port, port.clone(), port);
-                        }
-                    });
-            }
-
-            let connect_label = if self.connected {
-                "Disconnect"
-            } else {
-                "Connect"
-            };
-            if ui.button(connect_label).clicked() {
-                self.connected = !self.connected;
-            }
-
+            ui.label("Audio integration is not wired into `lv-app` yet.");
+            ui.small("The `lv-audio` backend exists, but this panel does not currently connect to a live MIDI engine.");
             ui.separator();
-            ui.horizontal(|ui| {
-                ui.label("Volume:");
-                ui.add(egui::Slider::new(&mut self.volume, 0.0..=2.0).fixed_decimals(2));
-            });
 
-            ui.checkbox(&mut self.graduated, "Graduated Beats");
+            ui.add_enabled_ui(false, |ui| {
+                if ui.button("Refresh ports").clicked() {
+                    self.refresh_ports();
+                }
 
-            if self.graduated {
+                if self.ports.is_empty() {
+                    ui.label("No MIDI ports found.");
+                } else {
+                    egui::ComboBox::from_label("Port")
+                        .selected_text(&self.selected_port)
+                        .show_ui(ui, |ui| {
+                            for port in &self.ports {
+                                ui.selectable_value(&mut self.selected_port, port.clone(), port);
+                            }
+                        });
+                }
+
+                let connect_label = if self.connected {
+                    "Disconnect"
+                } else {
+                    "Connect"
+                };
+                if ui.button(connect_label).clicked() {
+                    self.connected = !self.connected;
+                }
+
+                ui.separator();
                 ui.horizontal(|ui| {
-                    ui.label("Semitone range:");
-                    ui.add(egui::Slider::new(&mut self.semitone_range, 1..=24));
+                    ui.label("Volume:");
+                    ui.add(egui::Slider::new(&mut self.volume, 0.0..=2.0).fixed_decimals(2));
                 });
-            }
 
-            if ui.button("Test tone (middle C)").clicked() {
-                // TODO: fire note 60 on channel 0 when engine is wired in Phase 7
-            }
+                ui.checkbox(&mut self.graduated, "Graduated Beats");
+
+                if self.graduated {
+                    ui.horizontal(|ui| {
+                        ui.label("Semitone range:");
+                        ui.add(egui::Slider::new(&mut self.semitone_range, 1..=24));
+                    });
+                }
+
+                let _ = ui.button("Test tone (middle C)");
+            });
         }
     }
 }

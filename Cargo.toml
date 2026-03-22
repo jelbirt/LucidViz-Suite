@@ -65,6 +65,7 @@ sha2      = "0.10"
 rfd       = "0.17"
 num_cpus  = "1.16"
 rand      = { version = "0.8", features = ["small_rng"] }
+getrandom = { version = "0.2", features = ["js"] }
 dirs-next = "2.0"
 tempfile  = "3"
 

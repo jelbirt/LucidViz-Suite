@@ -379,12 +379,16 @@ fn default_mf_output_dir() -> PathBuf {
 
 fn load_mf_output(path: &std::path::Path) -> Result<MfOutput, String> {
     let json = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    serde_json::from_str(&json).map_err(|e| e.to_string())
+    let output: MfOutput = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+    output.validate().map_err(|e| e.to_string())?;
+    Ok(output)
 }
 
 fn load_mf_series_output(path: &std::path::Path) -> Result<MfSeriesOutput, String> {
     let json = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    serde_json::from_str(&json).map_err(|e| e.to_string())
+    let output: MfSeriesOutput = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+    output.validate().map_err(|e| e.to_string())?;
+    Ok(output)
 }
 
 #[cfg(test)]

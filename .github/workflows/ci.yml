@@ -52,6 +52,10 @@ jobs:
       - name: Build workspace
         run: cargo build --workspace
 
+      - name: Check workspace with all features (Linux)
+        if: runner.os == 'Linux'
+        run: cargo check --workspace --all-features
+
       - name: Run tests
         run: cargo test --workspace
 
@@ -66,9 +70,8 @@ jobs:
         run: cargo fmt --all -- --check
 
   wasm-check:
-    name: WASM scaffold build (continue-on-error)
+    name: WASM scaffold build (lv-data)
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -95,22 +98,3 @@ jobs:
           --no-default-features
           --features wasm
           -p lv-data
-        continue-on-error: true
-
-      - name: Build as-pipeline for wasm32 (no-default-features + wasm)
-        run: >
-          cargo build
-          --target wasm32-unknown-unknown
-          --no-default-features
-          --features wasm
-          -p as-pipeline
-        continue-on-error: true
-
-      - name: Build mf-pipeline for wasm32 (no-default-features + wasm)
-        run: >
-          cargo build
-          --target wasm32-unknown-unknown
-          --no-default-features
-          --features wasm
-          -p mf-pipeline
-        continue-on-error: true

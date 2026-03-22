@@ -40,7 +40,7 @@ pub fn pivot_mds(dist: &SeMatrix, dims: usize, n_pivots: usize) -> Result<MdsCoo
         dims,
         stress,
         MdsAlgorithm::PivotMds,
-    ))
+    )?)
 }
 
 /// Farthest-point sampling: start with the node whose row sum is largest
@@ -166,7 +166,7 @@ mod tests {
                 vals[i * n + j] = (i as f64 - j as f64).abs();
             }
         }
-        SeMatrix::new(lbs, vals)
+        SeMatrix::new(lbs, vals).expect("test SE matrix should build")
     }
 
     #[test]

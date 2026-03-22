@@ -6,6 +6,8 @@ use anyhow::Result;
 
 use crate::error::MfError;
 
+const MAX_TEXT_BYTES: u64 = 32 * 1024 * 1024;
+
 #[derive(Debug, Clone)]
 pub struct TextSource {
     pub label: String,
@@ -15,8 +17,21 @@ pub struct TextSource {
 
 /// Read a single UTF-8 text file into a `String`.
 pub fn ingest_file(path: &Path) -> Result<String> {
-    let text = std::fs::read_to_string(path).map_err(MfError::Io)?;
+    let text = read_text_file_with_limit(path, MAX_TEXT_BYTES)?;
     Ok(text)
+}
+
+fn read_text_file_with_limit(path: &Path, limit: u64) -> Result<String> {
+    let metadata = std::fs::metadata(path).map_err(MfError::Io)?;
+    if metadata.len() > limit {
+        return Err(MfError::FileTooLarge {
+            path: path.display().to_string(),
+            bytes: metadata.len(),
+            limit,
+        }
+        .into());
+    }
+    Ok(std::fs::read_to_string(path).map_err(MfError::Io)?)
 }
 
 /// Concatenate multiple files (joined by `\n\n`).
@@ -152,5 +167,13 @@ mod tests {
         assert_eq!(sources[0].text, "standalone");
         assert_eq!(sources[1].label, "a");
         assert_eq!(sources[2].label, "b");
+    }
+
+    #[test]
+    fn test_ingest_file_rejects_oversized_input() {
+        let f = temp_txt("abcdef");
+        let err = read_text_file_with_limit(f.path(), 3).expect_err("oversized text should fail");
+        let msg = format!("{err:#}");
+        assert!(msg.contains("exceeding limit"));
     }
 }

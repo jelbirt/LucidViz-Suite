@@ -10,15 +10,31 @@
 use ndarray::Array2;
 use rayon::prelude::*;
 
+use crate::error::AsError;
 use crate::types::SeMatrix;
 
 /// Compute the n×n structural-equivalence distance matrix.
 ///
 /// Parallelised via rayon when `n > 50`.
-pub fn compute_se_matrix(adjacency: &Array2<f64>, labels: Vec<String>) -> SeMatrix {
+pub fn compute_se_matrix(
+    adjacency: &Array2<f64>,
+    labels: Vec<String>,
+) -> Result<SeMatrix, AsError> {
     let n = adjacency.nrows();
-    assert_eq!(n, adjacency.ncols(), "Adjacency matrix must be square");
-    assert_eq!(n, labels.len(), "Label count must match matrix size");
+    if n != adjacency.ncols() {
+        return Err(AsError::DimensionMismatch(format!(
+            "Adjacency matrix must be square, got {}x{}",
+            n,
+            adjacency.ncols()
+        )));
+    }
+    if n != labels.len() {
+        return Err(AsError::DimensionMismatch(format!(
+            "Label count {} does not match adjacency size {}",
+            labels.len(),
+            n
+        )));
+    }
 
     let mut data = vec![0.0f64; n * n];
 
@@ -79,7 +95,7 @@ mod tests {
     #[test]
     fn test_se_zero_diagonal() {
         let adj = array![[0.0, 1.0, 0.0], [1.0, 0.0, 1.0], [0.0, 1.0, 0.0]];
-        let se = compute_se_matrix(&adj, labels(3));
+        let se = compute_se_matrix(&adj, labels(3)).expect("SE matrix should build");
         for i in 0..3 {
             assert_eq!(se.get(i, i), 0.0, "Diagonal must be 0");
         }
@@ -93,7 +109,7 @@ mod tests {
             [2.0, 1.0, 0.0, 1.0],
             [0.0, 3.0, 1.0, 0.0]
         ];
-        let se = compute_se_matrix(&adj, labels(4));
+        let se = compute_se_matrix(&adj, labels(4)).expect("SE matrix should build");
         for i in 0..4 {
             for j in 0..4 {
                 let diff = (se.get(i, j) - se.get(j, i)).abs();
@@ -120,11 +136,18 @@ mod tests {
             [1.0, 1.0, 0.0, 0.0],
             [1.0, 1.0, 0.0, 0.0]
         ];
-        let se = compute_se_matrix(&adj, labels(4));
+        let se = compute_se_matrix(&adj, labels(4)).expect("SE matrix should build");
         assert!(
             se.get(2, 3) < 1e-12,
             "Structurally equivalent nodes 2 and 3 should have SE=0, got {}",
             se.get(2, 3)
         );
+    }
+
+    #[test]
+    fn test_se_rejects_dimension_mismatch() {
+        let adj = array![[0.0, 1.0, 0.0], [1.0, 0.0, 1.0]];
+        let err = compute_se_matrix(&adj, labels(2)).expect_err("non-square matrices must fail");
+        assert!(err.to_string().contains("square"));
     }
 }

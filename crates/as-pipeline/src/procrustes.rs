@@ -142,7 +142,7 @@ pub fn procrustes(
             dims,
             source.stress,
             source.algorithm,
-        ),
+        )?,
         rotation: rotation_flat,
         scale: ss,
         translation,
@@ -174,6 +174,7 @@ mod tests {
 
     fn make_coords(labels: Vec<String>, data: Vec<f64>, dims: usize) -> MdsCoordinates {
         MdsCoordinates::new(labels, data, dims, 0.0, MdsAlgorithm::Classical)
+            .expect("test coordinates should build")
     }
 
     fn labels(n: usize) -> Vec<String> {

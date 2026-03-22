@@ -37,7 +37,7 @@ pub fn run_pipeline(input: &AsPipelineInput) -> Result<AsPipelineResult> {
 
     for (name, adj) in &input.datasets {
         // Compute SE matrix.
-        let se = compute_se_matrix(adj, input.labels.clone());
+        let se = compute_se_matrix(adj, input.labels.clone())?;
         distance_matrices.push(se.clone());
 
         // Run MDS.
@@ -45,7 +45,7 @@ pub fn run_pipeline(input: &AsPipelineInput) -> Result<AsPipelineResult> {
         raw_coords.push(coords);
 
         // Compute centrality.
-        let centrality = compute_centrality(adj, &input.labels);
+        let centrality = compute_centrality(adj, &input.labels)?;
         centralities.push(CentralityState::Computed(centrality));
 
         let _ = name; // used for future output naming
@@ -147,13 +147,27 @@ pub fn mf_output_to_distance_matrix(
     similarity_matrix: &[f64],
     n: usize,
     method: SimToDistMethod,
-) -> DistanceMatrix {
-    assert_eq!(similarity_matrix.len(), n * n);
+) -> Result<DistanceMatrix> {
+    if labels.len() != n {
+        bail!(crate::error::AsError::DimensionMismatch(format!(
+            "MF labels length {} does not match declared matrix size {}",
+            labels.len(),
+            n
+        )));
+    }
+    if similarity_matrix.len() != n * n {
+        bail!(crate::error::AsError::DimensionMismatch(format!(
+            "MF similarity matrix expected {} values for {} labels, got {}",
+            n * n,
+            n,
+            similarity_matrix.len()
+        )));
+    }
     let data: Vec<f64> = similarity_matrix
         .iter()
         .map(|&s| sim_to_dist(s, method))
         .collect();
-    DistanceMatrix::new(labels, data)
+    Ok(DistanceMatrix::new(labels, data)?)
 }
 
 /// Legacy bridge name retained for compatibility.
@@ -162,7 +176,7 @@ pub fn mf_output_to_se_matrix(
     similarity_matrix: &[f64],
     n: usize,
     method: SimToDistMethod,
-) -> DistanceMatrix {
+) -> Result<DistanceMatrix> {
     mf_output_to_distance_matrix(labels, similarity_matrix, n, method)
 }
 
@@ -439,8 +453,13 @@ fn adjacency_to_edges(labels: &[String], adj: &Array2<f64>) -> Vec<lv_data::sche
 
 #[cfg(test)]
 mod tests {
-    use super::{align_coordinates, build_etv_dataset, unavailable_centrality_state};
-    use crate::types::{CentralityState, MdsAlgorithm, MdsCoordinates, ProcrustesMode};
+    use super::{
+        align_coordinates, build_etv_dataset, mf_output_to_distance_matrix, run_distance_pipeline,
+        unavailable_centrality_state,
+    };
+    use crate::types::{
+        CentralityState, DistanceMatrix, MdsAlgorithm, MdsCoordinates, ProcrustesMode,
+    };
     use ndarray::array;
 
     #[test]
@@ -451,7 +470,8 @@ mod tests {
             3,
             0.0,
             MdsAlgorithm::Classical,
-        );
+        )
+        .expect("test coordinates should build");
         let datasets = vec![("T1".to_string(), array![[0.0, 0.75], [0.75, 0.0]])];
 
         let etv = build_etv_dataset(&[coords], &datasets);
@@ -476,7 +496,8 @@ mod tests {
             2,
             0.0,
             MdsAlgorithm::Classical,
-        );
+        )
+        .expect("test coordinates should build");
         let datasets = vec![("T1".to_string(), array![[0.0, 0.75], [0.0, 0.0]])];
 
         let etv = build_etv_dataset(&[coords], &datasets);
@@ -495,7 +516,8 @@ mod tests {
             2,
             0.0,
             MdsAlgorithm::Classical,
-        );
+        )
+        .expect("test coordinates should build");
         let datasets = vec![("T1".to_string(), array![[0.0, 0.75], [0.5, 0.0]])];
 
         let etv = build_etv_dataset(&[coords], &datasets);
@@ -516,21 +538,24 @@ mod tests {
                 2,
                 0.0,
                 MdsAlgorithm::Classical,
-            ),
+            )
+            .expect("test coordinates should build"),
             MdsCoordinates::new(
                 vec!["a".into(), "b".into(), "c".into()],
                 vec![0.0, 0.0, 1.0, 0.0, 0.5, 0.8],
                 2,
                 0.0,
                 MdsAlgorithm::Classical,
-            ),
+            )
+            .expect("test coordinates should build"),
             MdsCoordinates::new(
                 vec!["a".into(), "b".into(), "c".into()],
                 vec![0.0, 0.0, 1.0, 0.0, 0.9, 0.6],
                 2,
                 0.0,
                 MdsAlgorithm::Classical,
-            ),
+            )
+            .expect("test coordinates should build"),
         ];
 
         let results = align_coordinates(&coords, ProcrustesMode::OptimalChoice, false)
@@ -552,5 +577,38 @@ mod tests {
             }
             CentralityState::Computed(_) => panic!("expected unavailable state"),
         }
+    }
+
+    #[test]
+    fn mf_output_to_distance_matrix_rejects_invalid_shape() {
+        let err = mf_output_to_distance_matrix(
+            vec!["alpha".into(), "beta".into()],
+            &[1.0, 0.5, 0.5],
+            2,
+            lv_data::SimToDistMethod::Linear,
+        )
+        .expect_err("invalid matrix shape must fail");
+
+        assert!(err.to_string().contains("expected 4 values"));
+    }
+
+    #[test]
+    fn run_distance_pipeline_rejects_zero_node_matrices() {
+        let input = crate::types::AsDistancePipelineInput {
+            datasets: vec![(
+                "empty".to_string(),
+                DistanceMatrix::new(Vec::new(), Vec::new()).expect("empty matrix shape is valid"),
+            )],
+            mds_config: crate::types::MdsConfig::Classical,
+            procrustes_mode: ProcrustesMode::None,
+            mds_dims: crate::types::MdsDimMode::Maximum,
+            normalize: false,
+            normalization_mode: crate::types::NormalizationMode::Independent,
+            target_range: 300.0,
+            procrustes_scale: true,
+        };
+
+        let err = run_distance_pipeline(&input).expect_err("zero-node inputs must fail");
+        assert!(err.to_string().contains("Too few nodes"));
     }
 }

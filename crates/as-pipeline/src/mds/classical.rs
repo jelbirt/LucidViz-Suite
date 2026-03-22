@@ -71,7 +71,7 @@ pub fn classical_mds(dist: &SeMatrix, dims: usize) -> Result<MdsCoordinates> {
         dims,
         stress,
         MdsAlgorithm::Classical,
-    ))
+    )?)
 }
 
 /// Kruskal stress-1: sqrt( sum_{i<j}(d_hat - d)^2 / sum_{i<j} d^2 )
@@ -112,7 +112,7 @@ mod tests {
 
     fn make_se(n: usize, vals: Vec<f64>) -> SeMatrix {
         let labels: Vec<String> = (0..n).map(|i| format!("n{}", i)).collect();
-        SeMatrix::new(labels, vals)
+        SeMatrix::new(labels, vals).expect("test SE matrix should build")
     }
 
     fn line_dist(n: usize) -> SeMatrix {

@@ -4,8 +4,9 @@ pub mod classical;
 pub mod pivot;
 pub mod smacof;
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 
+use crate::error::AsError;
 use crate::types::{DistanceMatrix, MdsConfig, MdsCoordinates, MdsDimMode};
 
 /// Run MDS on a distance matrix, selecting the algorithm from `cfg`.
@@ -17,6 +18,9 @@ pub fn run_mds(
     dim_mode: MdsDimMode,
 ) -> Result<MdsCoordinates> {
     let n = dist.n;
+    if n == 0 {
+        bail!(AsError::TooFewNodes(0));
+    }
     let dims = resolve_dims(dim_mode, n);
 
     match cfg {

@@ -58,7 +58,7 @@ pub fn smacof(dist: &SeMatrix, dims: usize, cfg: &SmacofConfig) -> Result<MdsCoo
         dims,
         stress,
         MdsAlgorithm::Smacof,
-    ))
+    )?)
 }
 
 /// One Guttman transform step: X_new = (1/N) * B(X) * X
@@ -149,7 +149,7 @@ mod tests {
                 vals[i * n + j] = (i as f64 - j as f64).abs();
             }
         }
-        SeMatrix::new(lbs, vals)
+        SeMatrix::new(lbs, vals).expect("test SE matrix should build")
     }
 
     #[test]
