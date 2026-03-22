@@ -1119,10 +1119,11 @@ fn apply_object_override(
 }
 
 fn lis_config_from_prefs(prefs: &UserPreferences) -> LisConfig {
-    let mut config = LisConfig::default();
-    config.lis_value = prefs.default_lis.max(2);
-    config.target_fps = prefs.default_fps;
-    config
+    LisConfig {
+        lis_value: prefs.default_lis.max(2),
+        target_fps: prefs.default_fps,
+        ..LisConfig::default()
+    }
 }
 
 #[cfg(test)]
