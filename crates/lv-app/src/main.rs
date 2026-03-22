@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use app_state::{build_gpu_edges, compute_ego_edges, compute_visible_objects, EgoClusterState};
 use lv_data::{EtvDataset, EtvRow, EtvSheet, GpuInstance, LisBuffer, LisConfig, ShapeKind};
+use lv_gui::state::PlayState;
 use lv_gui::{AppState, LucidWorkspace};
 use lv_renderer::shapes::{self, cube, cylinder, point, pyramid, sphere, torus};
 use lv_renderer::{
@@ -396,6 +397,10 @@ impl Renderer {
         let dataset = make_demo_dataset();
         let lis_config = LisConfig::default();
         let lis_buffer = build_lis_buffer(&dataset, &lis_config);
+        let mut app_state = AppState::new();
+        app_state.dataset = Some(dataset.clone());
+        app_state.lis_config = lis_config.clone();
+        app_state.lis_buffer = Some(lis_buffer.clone());
 
         let size = window.inner_size();
         let aspect = size.width as f32 / size.height.max(1) as f32;
@@ -626,7 +631,7 @@ impl Renderer {
             lis_config,
             slice_index: 0,
             workspace: LucidWorkspace::new(),
-            app_state: AppState::new(),
+            app_state,
             egui_ctx,
             egui_winit,
             egui_renderer,
@@ -674,6 +679,8 @@ impl Renderer {
     fn rebuild_lis(&mut self) {
         self.lis_buffer = build_lis_buffer(&self.dataset, &self.lis_config);
         self.slice_index = 0;
+        self.app_state.lis_buffer = Some(self.lis_buffer.clone());
+        self.app_state.slice_index = 0;
     }
 
     /// Object picking: project world-space positions to screen, find closest to
@@ -756,6 +763,11 @@ impl Renderer {
             self.app_state.rebuild_lis = false;
         }
 
+        self.lis_config = self.app_state.lis_config.clone();
+        self.timer.set_target_fps(self.lis_config.target_fps);
+        self.timer.set_speed(self.lis_config.speed);
+        self.app_state.lis_buffer = Some(self.lis_buffer.clone());
+
         // Sync ego state from GUI app_state
         self.ego_state.cluster_value_min = self.app_state.cluster_min;
         self.ego_state.cluster_value_max = self.app_state.cluster_max;
@@ -766,15 +778,22 @@ impl Renderer {
             self.ego_state.selected = None;
         }
 
-        // advance animation
-        let adv = self.timer.tick();
         let total = if self.lis_buffer.streaming {
             self.lis_config.lis_value
         } else {
             self.lis_buffer.frames.len() as u32
         };
         if total > 0 {
-            self.slice_index = (self.slice_index + adv.advance_slices) % total;
+            self.slice_index = self.app_state.slice_index.min(total - 1);
+            let adv = self.timer.tick();
+            self.slice_index = advance_slice_index(
+                self.slice_index,
+                total,
+                self.app_state.play_state,
+                self.lis_config.looping,
+                adv.advance_slices,
+            );
+            self.app_state.slice_index = self.slice_index;
         }
 
         // camera uniforms
@@ -830,7 +849,7 @@ impl Renderer {
             .iter()
             .zip(frame.labels.iter())
             .map(|(inst, label)| {
-                let mut gi = *inst;
+                let mut gi = apply_object_override(*inst, self.app_state.overrides.get(label));
                 if let Some(vs) = &visible_set {
                     if has_ego_selection {
                         if vs.contains(label) {
@@ -1047,6 +1066,90 @@ impl Renderer {
         } else {
             self.camera.key_pressed(ck);
         }
+    }
+}
+
+fn advance_slice_index(
+    current: u32,
+    total: u32,
+    play_state: PlayState,
+    looping: bool,
+    advance_slices: u32,
+) -> u32 {
+    if total == 0 {
+        return 0;
+    }
+    match play_state {
+        PlayState::Playing => {
+            if looping {
+                (current + advance_slices) % total
+            } else {
+                (current + advance_slices).min(total - 1)
+            }
+        }
+        PlayState::Paused => current.min(total - 1),
+        PlayState::Stopped => 0,
+    }
+}
+
+fn apply_object_override(
+    mut instance: GpuInstance,
+    override_cfg: Option<&lv_gui::state::ObjectOverride>,
+) -> GpuInstance {
+    if let Some(override_cfg) = override_cfg {
+        if let Some(shape) = override_cfg.shape {
+            instance.shape_id = shape.gpu_id();
+        }
+        if let Some(size) = override_cfg.size {
+            instance.size = size as f32;
+        }
+        if let Some(color) = override_cfg.color {
+            instance.color[0] = color[0];
+            instance.color[1] = color[1];
+            instance.color[2] = color[2];
+        }
+    }
+    instance
+}
+
+#[cfg(test)]
+mod runtime_tests {
+    use super::{advance_slice_index, apply_object_override};
+    use lv_data::{GpuInstance, ShapeKind};
+    use lv_gui::state::{ObjectOverride, PlayState};
+
+    #[test]
+    fn advance_slice_index_respects_play_state_and_looping() {
+        assert_eq!(advance_slice_index(3, 10, PlayState::Playing, true, 2), 5);
+        assert_eq!(advance_slice_index(9, 10, PlayState::Playing, true, 2), 1);
+        assert_eq!(advance_slice_index(9, 10, PlayState::Playing, false, 2), 9);
+        assert_eq!(advance_slice_index(4, 10, PlayState::Paused, true, 5), 4);
+        assert_eq!(advance_slice_index(4, 10, PlayState::Stopped, true, 5), 0);
+    }
+
+    #[test]
+    fn apply_object_override_updates_shape_size_and_rgb_only() {
+        let instance = GpuInstance {
+            position: [0.0, 0.0, 0.0],
+            size: 1.0,
+            size_alpha: 0.5,
+            _pad0: [0.0; 3],
+            color: [0.1, 0.2, 0.3, 0.8],
+            spin: [0.0, 0.0, 0.0],
+            shape_id: ShapeKind::Sphere.gpu_id(),
+        };
+        let override_cfg = ObjectOverride {
+            shape: Some(ShapeKind::Cube),
+            color: Some([0.9, 0.8, 0.7]),
+            size: Some(2.5),
+        };
+
+        let updated = apply_object_override(instance, Some(&override_cfg));
+
+        assert_eq!(updated.shape_id, ShapeKind::Cube.gpu_id());
+        assert_eq!(updated.size, 2.5);
+        assert_eq!(updated.color, [0.9, 0.8, 0.7, 0.8]);
+        assert_eq!(updated.size_alpha, 0.5);
     }
 }
 

@@ -6,7 +6,10 @@ use crate::state::AppState;
 
 /// Events emitted by the file loader panel.
 pub enum FileLoaderEvent {
-    Loaded(EtvDataset),
+    Loaded {
+        dataset: EtvDataset,
+        path: std::path::PathBuf,
+    },
     Error(String),
     None,
 }
@@ -28,7 +31,7 @@ impl FileLoaderPanel {
                 .pick_file()
             {
                 match read_etv_xlsx(&path) {
-                    Ok(ds) => ev = FileLoaderEvent::Loaded(ds),
+                    Ok(dataset) => ev = FileLoaderEvent::Loaded { dataset, path },
                     Err(e) => ev = FileLoaderEvent::Error(format!("XLSX load error: {e}")),
                 }
             }
@@ -40,7 +43,7 @@ impl FileLoaderPanel {
                 .pick_file()
             {
                 match load_dataset_json(&path) {
-                    Ok(ds) => ev = FileLoaderEvent::Loaded(ds),
+                    Ok(dataset) => ev = FileLoaderEvent::Loaded { dataset, path },
                     Err(e) => ev = FileLoaderEvent::Error(format!("JSON load error: {e}")),
                 }
             }
@@ -59,7 +62,7 @@ impl FileLoaderPanel {
                     read_etv_xlsx(&p).map_err(|e| e.to_string())
                 };
                 match result {
-                    Ok(ds) => ev = FileLoaderEvent::Loaded(ds),
+                    Ok(dataset) => ev = FileLoaderEvent::Loaded { dataset, path: p },
                     Err(e) => ev = FileLoaderEvent::Error(e),
                 }
             }

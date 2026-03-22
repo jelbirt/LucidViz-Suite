@@ -244,6 +244,7 @@ impl AsPanel {
                                     state.dataset = Some(dataset);
                                     state.source_path = Some(path.clone());
                                     state.as_input_source = AsInputSource::Dataset;
+                                    state.slice_index = 0;
                                     state.dataset_changed = true;
                                     state.load_error = None;
                                     self.status = "AlignSpace output loaded into LV.".into();
@@ -301,6 +302,7 @@ impl AsPanel {
     fn launch_dataset_job(&self, ds: &EtvDataset, output_dir: PathBuf, state: &mut AppState) {
         let (tx, rx) = mpsc::channel::<PipelineEvent>();
 
+        let source_dataset = ds.clone();
         let all_labels = collect_dataset_labels(ds);
         let (datasets, dropped_edges) = build_dataset_adjacencies(ds, &all_labels);
 
@@ -335,7 +337,8 @@ impl AsPanel {
                 procrustes_scale: true,
             };
             match run_pipeline(&input) {
-                Ok(result) => {
+                Ok(mut result) => {
+                    preserve_lv_metadata(&mut result, &source_dataset);
                     let _ = tx.send(PipelineEvent::Progress {
                         step: "Writing output…".into(),
                         pct: 0.9,
@@ -475,6 +478,34 @@ impl AsPanel {
     }
 }
 
+fn preserve_lv_metadata(result: &mut AsPipelineResult, source: &EtvDataset) {
+    for (sheet_idx, output_sheet) in result.etv_dataset.sheets.iter_mut().enumerate() {
+        let Some(source_sheet) = source.sheets.get(sheet_idx) else {
+            continue;
+        };
+        let source_rows: HashMap<&str, &lv_data::schema::EtvRow> = source_sheet
+            .rows
+            .iter()
+            .map(|row| (row.label.as_str(), row))
+            .collect();
+
+        for output_row in &mut output_sheet.rows {
+            let Some(source_row) = source_rows.get(output_row.label.as_str()) else {
+                continue;
+            };
+            let (x, y, z) = (output_row.x, output_row.y, output_row.z);
+            let mut preserved = (*source_row).clone();
+            preserved.x = x;
+            preserved.y = y;
+            preserved.z = z;
+            *output_row = preserved;
+        }
+    }
+
+    result.etv_dataset.all_labels =
+        EtvDataset::canonical_all_labels_from_sheets(&result.etv_dataset.sheets);
+}
+
 fn build_mf_distance_input(
     mf_output: &mf_pipeline::types::MfOutput,
     mds_config: MdsConfig,
@@ -568,7 +599,7 @@ fn load_etv_dataset(path: &std::path::Path) -> Result<EtvDataset, String> {
 mod tests {
     use super::{
         build_dataset_adjacencies, build_mf_distance_input, collect_dataset_labels,
-        write_gui_output_artifacts,
+        preserve_lv_metadata, write_gui_output_artifacts,
     };
     use as_pipeline::types::CentralityReport;
     use as_pipeline::types::{
@@ -835,5 +866,82 @@ mod tests {
         .expect_err("invalid MF output must fail");
 
         assert!(err.contains("similarity_matrix expected 4 values"));
+    }
+
+    #[test]
+    fn preserve_lv_metadata_keeps_source_row_fields_and_updates_positions() {
+        let source = EtvDataset {
+            source_path: None,
+            sheets: vec![EtvSheet {
+                name: "T1".into(),
+                sheet_index: 0,
+                rows: vec![EtvRow {
+                    label: "alpha".into(),
+                    x: 10.0,
+                    y: 20.0,
+                    z: 30.0,
+                    size: 2.5,
+                    size_alpha: 0.75,
+                    spin_x: 1.0,
+                    spin_y: 2.0,
+                    spin_z: 3.0,
+                    shape: lv_data::ShapeKind::Cube,
+                    color_r: 0.2,
+                    color_g: 0.3,
+                    color_b: 0.4,
+                    note: 72,
+                    instrument: 33,
+                    channel: 4,
+                    velocity: 99,
+                    cluster_value: 7.0,
+                    beats: 3,
+                }],
+                edges: vec![],
+            }],
+            all_labels: vec!["alpha".into()],
+        };
+
+        let mut result = AsPipelineResult {
+            coordinates: vec![],
+            procrustes: vec![],
+            centralities: vec![],
+            distance_matrices: vec![],
+            etv_dataset: EtvDataset {
+                source_path: None,
+                sheets: vec![EtvSheet {
+                    name: "T1".into(),
+                    sheet_index: 0,
+                    rows: vec![EtvRow {
+                        label: "alpha".into(),
+                        x: 1.0,
+                        y: 2.0,
+                        z: 3.0,
+                        ..Default::default()
+                    }],
+                    edges: vec![],
+                }],
+                all_labels: vec!["alpha".into()],
+            },
+        };
+
+        preserve_lv_metadata(&mut result, &source);
+
+        let row = &result.etv_dataset.sheets[0].rows[0];
+        assert_eq!(row.x, 1.0);
+        assert_eq!(row.y, 2.0);
+        assert_eq!(row.z, 3.0);
+        assert_eq!(row.shape, lv_data::ShapeKind::Cube);
+        assert_eq!(row.size, 2.5);
+        assert_eq!(row.size_alpha, 0.75);
+        assert_eq!(row.spin_y, 2.0);
+        assert_eq!(row.note, 72);
+        assert_eq!(row.instrument, 33);
+        assert_eq!(row.channel, 4);
+        assert_eq!(row.velocity, 99);
+        assert_eq!(row.cluster_value, 7.0);
+        assert_eq!(row.beats, 3);
+        assert!((row.color_r - 0.2).abs() < f32::EPSILON);
+        assert!((row.color_g - 0.3).abs() < f32::EPSILON);
+        assert!((row.color_b - 0.4).abs() < f32::EPSILON);
     }
 }

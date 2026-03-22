@@ -93,9 +93,7 @@ impl LucidWorkspace {
             .default_open(true)
             .show(ui, |ui| {
                 let evt = self.lv_panels.file_loader.show(ui, state);
-                if matches!(evt, FileLoaderEvent::Loaded(_)) {
-                    needs_rebuild = true;
-                }
+                needs_rebuild |= apply_file_loader_event(state, evt);
             });
 
         ui.separator();
@@ -106,6 +104,7 @@ impl LucidWorkspace {
             .show(ui, |ui| {
                 let evt = self.lv_panels.lis_controls.show(ui, state);
                 if matches!(evt, LisEvent::RebuildBuffer) {
+                    state.rebuild_lis = true;
                     needs_rebuild = true;
                 }
             });
@@ -151,5 +150,101 @@ impl LucidWorkspace {
         }
 
         needs_rebuild
+    }
+}
+
+fn apply_file_loader_event(state: &mut AppState, evt: FileLoaderEvent) -> bool {
+    match evt {
+        FileLoaderEvent::Loaded { dataset, path } => {
+            state.dataset = Some(dataset);
+            state.source_path = Some(path);
+            state.as_input_source = crate::state::AsInputSource::Dataset;
+            state.mf_output = None;
+            state.mf_series_output = None;
+            state.slice_index = 0;
+            state.dataset_changed = true;
+            state.load_error = None;
+            true
+        }
+        FileLoaderEvent::Error(err) => {
+            state.load_error = Some(err);
+            false
+        }
+        FileLoaderEvent::None => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::apply_file_loader_event;
+    use crate::panels::FileLoaderEvent;
+    use crate::state::{AppState, AsInputSource};
+    use lv_data::schema::EtvDataset;
+    use mf_pipeline::types::{MfOutput, MfSeriesOutput};
+    use std::path::PathBuf;
+
+    #[test]
+    fn apply_file_loader_event_sets_dataset_and_resets_related_state() {
+        let mut state = AppState::new();
+        state.as_input_source = AsInputSource::MatrixForge;
+        state.slice_index = 12;
+        state.load_error = Some("old error".into());
+        state.mf_output = Some(MfOutput {
+            labels: vec!["a".into()],
+            similarity_matrix: vec![1.0],
+            sim_to_dist: lv_data::SimToDistMethod::Linear,
+            nppmi_matrix: vec![1.0],
+            raw_counts: vec![0],
+            ppmi_matrix: vec![0.0],
+            n: 1,
+            centrality: as_pipeline::types::CentralityReport {
+                labels: vec!["a".into()],
+                degree: vec![0.0],
+                distance: vec![0.0],
+                closeness: vec![0.0],
+                betweenness: vec![0.0],
+            },
+        });
+        state.mf_series_output = Some(MfSeriesOutput {
+            labels: vec!["a".into()],
+            sim_to_dist: lv_data::SimToDistMethod::Linear,
+            slices: vec![],
+        });
+
+        let path = PathBuf::from("/tmp/sample.json");
+        let dataset = EtvDataset {
+            source_path: None,
+            sheets: vec![],
+            all_labels: vec![],
+        };
+
+        let needs_rebuild = apply_file_loader_event(
+            &mut state,
+            FileLoaderEvent::Loaded {
+                dataset,
+                path: path.clone(),
+            },
+        );
+
+        assert!(needs_rebuild);
+        assert!(state.dataset.is_some());
+        assert_eq!(state.source_path, Some(path));
+        assert_eq!(state.as_input_source, AsInputSource::Dataset);
+        assert_eq!(state.slice_index, 0);
+        assert!(state.dataset_changed);
+        assert!(state.load_error.is_none());
+        assert!(state.mf_output.is_none());
+        assert!(state.mf_series_output.is_none());
+    }
+
+    #[test]
+    fn apply_file_loader_event_error_only_sets_load_error() {
+        let mut state = AppState::new();
+        let needs_rebuild =
+            apply_file_loader_event(&mut state, FileLoaderEvent::Error("boom".into()));
+
+        assert!(!needs_rebuild);
+        assert_eq!(state.load_error.as_deref(), Some("boom"));
+        assert!(state.dataset.is_none());
     }
 }
