@@ -12,6 +12,17 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::Path;
 
+fn render_headless_or_skip(frame: &lv_data::LisFrame, width: u32, height: u32) -> Option<Vec<u8>> {
+    match try_render_headless(frame, width, height) {
+        Ok(pixels) => Some(pixels),
+        Err(err) if err.to_string().contains("no headless adapter") => {
+            eprintln!("Skipping headless render test: {err:#}");
+            None
+        }
+        Err(err) => panic!("headless render failed: {err:#}"),
+    }
+}
+
 fn make_small_dataset() -> EtvDataset {
     let rows: Vec<EtvRow> = (0..10)
         .map(|i| EtvRow {
@@ -132,7 +143,9 @@ fn headless_render_produces_non_black_image() {
 
     let frame = &lis_buffer.frames[0];
     let (width, height) = (256u32, 256u32);
-    let pixels = try_render_headless(frame, width, height).expect("headless render failed");
+    let Some(pixels) = render_headless_or_skip(frame, width, height) else {
+        return;
+    };
 
     // Correct byte count
     assert_eq!(
@@ -223,7 +236,9 @@ fn migration_dataset_golden_hashes() {
 
     for &idx in &key_frames {
         let frame = &buf.frames[idx];
-        let pixels = try_render_headless(frame, width, height).expect("headless render failed");
+        let Some(pixels) = render_headless_or_skip(frame, width, height) else {
+            return;
+        };
         assert_eq!(
             pixels.len(),
             (width * height * 4) as usize,
