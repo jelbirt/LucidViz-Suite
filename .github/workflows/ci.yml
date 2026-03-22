@@ -59,6 +59,10 @@ jobs:
       - name: Run tests
         run: cargo test --workspace
 
+      - name: Run headless renderer golden tests (Linux)
+        if: runner.os == 'Linux'
+        run: cargo test -p lv-renderer --features headless --test full_render_cycle
+
       - name: Clippy (zero warnings)
         run: cargo clippy --workspace -- -D warnings
 

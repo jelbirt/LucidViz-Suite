@@ -3,7 +3,9 @@
 //! Converts an `EtvDataset` into a `LisBuffer` of pre-computed `LisFrame`s, or
 //! marks the buffer as streaming if the estimated size exceeds 100 MB.
 
-use lv_data::{EtvDataset, EtvRow, GpuInstance, LisBuffer, LisConfig, LisFrame};
+use std::collections::HashMap;
+
+use lv_data::{EtvDataset, EtvRow, EtvSheet, GpuInstance, LisBuffer, LisConfig, LisFrame};
 
 const STREAM_THRESHOLD_BYTES: usize = 100 * 1024 * 1024; // 100 MB
 
@@ -42,42 +44,30 @@ pub fn build_lis_buffer(dataset: &EtvDataset, config: &LisConfig) -> LisBuffer {
         };
     }
 
+    let indexed_sheets: Vec<HashMap<&str, &EtvRow>> =
+        dataset.sheets.iter().map(index_sheet_rows).collect();
     let mut frames: Vec<LisFrame> = Vec::new();
     let transitions = if time_pts > 1 { time_pts - 1 } else { 1 };
 
     for t in 0..transitions {
-        let sheet_a = &dataset.sheets[t];
-        let sheet_b = if t + 1 < dataset.sheets.len() {
-            &dataset.sheets[t + 1]
+        let rows_a = &indexed_sheets[t];
+        let rows_b = if t + 1 < indexed_sheets.len() {
+            &indexed_sheets[t + 1]
         } else {
-            sheet_a
+            rows_a
         };
 
         for k in 0..lis {
             let alpha = k as f64 / lis as f64;
-            let mut labeled_instances: Vec<(String, GpuInstance)> = Vec::new();
-
-            for label in &dataset.all_labels {
-                let row_a = sheet_a.rows.iter().find(|r| &r.label == label);
-                let row_b = sheet_b.rows.iter().find(|r| &r.label == label);
-
-                if let Some(inst) = interpolate(row_a, row_b, alpha, label) {
-                    labeled_instances.push((label.clone(), inst));
-                }
-            }
-
-            // Sort by shape_id for minimal draw-call switching
-            labeled_instances.sort_by_key(|(_, inst)| inst.shape_id);
-            let (labels, instances): (Vec<String>, Vec<GpuInstance>) =
-                labeled_instances.into_iter().unzip();
-
-            frames.push(LisFrame {
-                instances,
-                labels,
-                slice_index: t as u32 * lis + k,
-                transition_index: t as u32,
-                local_slice: k,
-            });
+            frames.push(build_frame(
+                dataset,
+                rows_a,
+                rows_b,
+                alpha,
+                t as u32 * lis + k,
+                t as u32,
+                k,
+            ));
         }
     }
 
@@ -105,17 +95,45 @@ pub fn compute_frame(dataset: &EtvDataset, config: &LisConfig, slice_index: u32)
     let alpha = local_slice as f64 / lis as f64;
 
     let t = transition_index as usize;
-    let sheet_a = &dataset.sheets[t];
-    let sheet_b = if t + 1 < dataset.sheets.len() {
-        &dataset.sheets[t + 1]
+    let rows_a = index_sheet_rows(&dataset.sheets[t]);
+    let rows_b = if t + 1 < dataset.sheets.len() {
+        index_sheet_rows(&dataset.sheets[t + 1])
     } else {
-        sheet_a
+        index_sheet_rows(&dataset.sheets[t])
     };
 
+    build_frame(
+        dataset,
+        &rows_a,
+        &rows_b,
+        alpha,
+        slice_index,
+        transition_index,
+        local_slice,
+    )
+}
+
+fn index_sheet_rows(sheet: &EtvSheet) -> HashMap<&str, &EtvRow> {
+    sheet
+        .rows
+        .iter()
+        .map(|row| (row.label.as_str(), row))
+        .collect()
+}
+
+fn build_frame(
+    dataset: &EtvDataset,
+    rows_a: &HashMap<&str, &EtvRow>,
+    rows_b: &HashMap<&str, &EtvRow>,
+    alpha: f64,
+    slice_index: u32,
+    transition_index: u32,
+    local_slice: u32,
+) -> LisFrame {
     let mut labeled_instances: Vec<(String, GpuInstance)> = Vec::new();
     for label in &dataset.all_labels {
-        let row_a = sheet_a.rows.iter().find(|r| &r.label == label);
-        let row_b = sheet_b.rows.iter().find(|r| &r.label == label);
+        let row_a = rows_a.get(label.as_str()).copied();
+        let row_b = rows_b.get(label.as_str()).copied();
         if let Some(inst) = interpolate(row_a, row_b, alpha, label) {
             labeled_instances.push((label.clone(), inst));
         }

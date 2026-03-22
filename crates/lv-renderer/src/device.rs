@@ -65,7 +65,8 @@ impl WgpuContext {
             .iter()
             .find(|&&f| f == wgpu::TextureFormat::Bgra8UnormSrgb)
             .copied()
-            .unwrap_or_else(|| *caps.formats.first().expect("no surface formats"));
+            .or_else(|| caps.formats.first().copied())
+            .context("surface reported no supported formats")?;
 
         let present_mode = if caps.present_modes.contains(&wgpu::PresentMode::Fifo) {
             wgpu::PresentMode::Fifo

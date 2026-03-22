@@ -11,8 +11,7 @@ use as_pipeline::types::{
     AsDistancePipelineInput, AsPipelineInput, AsPipelineResult, MdsConfig, MdsDimMode,
     NormalizationMode, ProcrustesMode, SmacofConfig, SmacofInit,
 };
-use lv_data::schema::EtvDataset;
-use lv_data::validate_dataset;
+use lv_data::{load_dataset_json, write_etv_json, EtvDataset};
 use mf_pipeline::pipeline::{mf_series_output_to_as_input, MfSeriesAsInputOptions};
 use ndarray::Array2;
 
@@ -556,19 +555,13 @@ fn write_gui_output_artifacts(
     write_as_results(result, output_dir).map_err(|e| e.to_string())?;
 
     let dataset_path = output_dir.join("etv_dataset.json");
-    let dataset_json =
-        serde_json::to_string_pretty(&result.etv_dataset).map_err(|e| e.to_string())?;
-    std::fs::write(&dataset_path, dataset_json).map_err(|e| e.to_string())?;
+    write_etv_json(&result.etv_dataset, &dataset_path).map_err(|e| e.to_string())?;
 
     Ok(dataset_path)
 }
 
 fn load_etv_dataset(path: &std::path::Path) -> Result<EtvDataset, String> {
-    let json = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let mut dataset: EtvDataset = serde_json::from_str(&json).map_err(|e| e.to_string())?;
-    dataset.canonicalize_all_labels();
-    validate_dataset(&dataset).map_err(|e| e.to_string())?;
-    Ok(dataset)
+    load_dataset_json(path).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

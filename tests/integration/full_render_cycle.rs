@@ -7,7 +7,7 @@
 //!  4. Phase 9: SHA-256 golden-hash assertions across 5 key frames.
 
 use lv_data::{EtvDataset, EtvRow, EtvSheet, LisConfig, ShapeKind};
-use lv_renderer::{build_lis_buffer, render_headless};
+use lv_renderer::{build_lis_buffer, try_render_headless};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::Path;
@@ -132,7 +132,7 @@ fn headless_render_produces_non_black_image() {
 
     let frame = &lis_buffer.frames[0];
     let (width, height) = (256u32, 256u32);
-    let pixels = render_headless(frame, width, height);
+    let pixels = try_render_headless(frame, width, height).expect("headless render failed");
 
     // Correct byte count
     assert_eq!(
@@ -223,7 +223,7 @@ fn migration_dataset_golden_hashes() {
 
     for &idx in &key_frames {
         let frame = &buf.frames[idx];
-        let pixels = render_headless(frame, width, height);
+        let pixels = try_render_headless(frame, width, height).expect("headless render failed");
         assert_eq!(
             pixels.len(),
             (width * height * 4) as usize,

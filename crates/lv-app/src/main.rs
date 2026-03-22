@@ -390,8 +390,8 @@ struct Renderer {
 }
 
 impl Renderer {
-    fn new(window: &Window) -> Self {
-        let ctx = WgpuContext::new(window).expect("WgpuContext");
+    fn new(window: &Window) -> anyhow::Result<Self> {
+        let ctx = WgpuContext::new(window)?;
 
         let dataset = make_demo_dataset();
         let lis_config = LisConfig::default();
@@ -611,7 +611,7 @@ impl Renderer {
             },
         );
 
-        Self {
+        Ok(Self {
             ctx,
             camera,
             timer,
@@ -639,7 +639,7 @@ impl Renderer {
             last_click_pos: None,
             prefs: UserPreferences::load(),
             notifications: NotificationQueue::default(),
-        }
+        })
     }
 
     fn make_depth_view(device: &wgpu::Device, w: u32, h: u32) -> wgpu::TextureView {
@@ -898,11 +898,16 @@ impl Renderer {
             .ctx
             .surface
             .as_ref()
-            .expect("surface required in interactive mode")
-            .get_current_texture()
+            .ok_or_else(|| anyhow::anyhow!("surface required in interactive mode"))
+            .map_err(|err| {
+                log::error!("{err:#}");
+                err
+            })
+            .ok()
+            .and_then(|surface| surface.get_current_texture().ok())
         {
-            Ok(t) => t,
-            Err(_) => return,
+            Some(t) => t,
+            None => return,
         };
         let surface_view = surface_tex
             .texture
@@ -1060,8 +1065,23 @@ impl ApplicationHandler for App {
         let attrs = Window::default_attributes()
             .with_title("Lucid Visualization Suite")
             .with_inner_size(winit::dpi::LogicalSize::new(1280u32, 720u32));
-        let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
-        self.renderer = Some(Renderer::new(&window));
+        let window = match event_loop.create_window(attrs) {
+            Ok(window) => Arc::new(window),
+            Err(err) => {
+                log::error!("Failed to create window: {err:#}");
+                event_loop.exit();
+                return;
+            }
+        };
+        let renderer = match Renderer::new(&window) {
+            Ok(renderer) => renderer,
+            Err(err) => {
+                log::error!("Failed to initialize renderer: {err:#}");
+                event_loop.exit();
+                return;
+            }
+        };
+        self.renderer = Some(renderer);
         self.window = Some(window);
     }
 
@@ -1151,11 +1171,19 @@ impl ApplicationHandler for App {
 
 fn main() {
     env_logger::init();
-    let event_loop = EventLoop::new().expect("event loop");
+    let event_loop = match EventLoop::new() {
+        Ok(event_loop) => event_loop,
+        Err(err) => {
+            log::error!("Failed to create event loop: {err:#}");
+            return;
+        }
+    };
     event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
     let mut app = App {
         window: None,
         renderer: None,
     };
-    event_loop.run_app(&mut app).expect("run_app");
+    if let Err(err) = event_loop.run_app(&mut app) {
+        log::error!("Application event loop failed: {err:#}");
+    }
 }

@@ -205,10 +205,151 @@ pub struct MfSeriesOutput {
 
 impl MfSeriesOutput {
     pub fn validate(&self) -> Result<()> {
+        if self.slices.is_empty() {
+            bail!("MF series output must contain at least one slice");
+        }
+
         for slice in &self.slices {
             slice.output.validate()?;
         }
         Ok(())
+    }
+
+    pub fn validate_for_as_input(&self) -> Result<()> {
+        self.validate()?;
+
+        let first = &self.slices[0].output;
+        if !self.labels.is_empty() && self.labels != first.labels {
+            bail!(
+                "MF series top-level labels do not match slice '{}' labels",
+                self.slices[0].label
+            );
+        }
+        if self.sim_to_dist != first.sim_to_dist {
+            bail!(
+                "MF series top-level sim_to_dist {:?} does not match slice '{}' sim_to_dist {:?}",
+                self.sim_to_dist,
+                self.slices[0].label,
+                first.sim_to_dist
+            );
+        }
+
+        for slice in &self.slices[1..] {
+            if slice.output.labels != first.labels {
+                bail!(
+                    "MF series slice '{}' labels do not match the shared AS label ordering",
+                    slice.label
+                );
+            }
+            if slice.output.n != first.n {
+                bail!(
+                    "MF series slice '{}' size {} does not match first slice size {}",
+                    slice.label,
+                    slice.output.n,
+                    first.n
+                );
+            }
+            if slice.output.sim_to_dist != first.sim_to_dist {
+                bail!(
+                    "MF series slice '{}' sim_to_dist {:?} does not match first slice sim_to_dist {:?}",
+                    slice.label,
+                    slice.output.sim_to_dist,
+                    first.sim_to_dist
+                );
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn centrality(labels: &[&str]) -> CentralityReport {
+        CentralityReport {
+            labels: labels.iter().map(|label| (*label).to_string()).collect(),
+            degree: vec![0.0; labels.len()],
+            distance: vec![0.0; labels.len()],
+            closeness: vec![0.0; labels.len()],
+            betweenness: vec![0.0; labels.len()],
+        }
+    }
+
+    fn output(labels: &[&str], sim_to_dist: SimToDistMethod) -> MfOutput {
+        let n = labels.len();
+        MfOutput {
+            labels: labels.iter().map(|label| (*label).to_string()).collect(),
+            similarity_matrix: vec![0.0; n * n],
+            sim_to_dist,
+            nppmi_matrix: vec![0.0; n * n],
+            raw_counts: vec![0; n * n],
+            ppmi_matrix: vec![0.0; n * n],
+            n,
+            centrality: centrality(labels),
+        }
+    }
+
+    fn slice(label: &str, labels: &[&str], sim_to_dist: SimToDistMethod) -> MfSlice {
+        MfSlice {
+            id: label.to_string(),
+            label: label.to_string(),
+            order: 0,
+            source_paths: Vec::new(),
+            token_count: 1,
+            output: output(labels, sim_to_dist),
+        }
+    }
+
+    #[test]
+    fn series_validate_for_as_input_accepts_consistent_slices() {
+        let series = MfSeriesOutput {
+            labels: vec!["alpha".into(), "beta".into()],
+            sim_to_dist: SimToDistMethod::Linear,
+            slices: vec![
+                slice("s1", &["alpha", "beta"], SimToDistMethod::Linear),
+                slice("s2", &["alpha", "beta"], SimToDistMethod::Linear),
+            ],
+        };
+
+        series
+            .validate_for_as_input()
+            .expect("series should validate");
+    }
+
+    #[test]
+    fn series_validate_for_as_input_rejects_mismatched_label_order() {
+        let series = MfSeriesOutput {
+            labels: vec!["alpha".into(), "beta".into()],
+            sim_to_dist: SimToDistMethod::Linear,
+            slices: vec![
+                slice("s1", &["alpha", "beta"], SimToDistMethod::Linear),
+                slice("s2", &["beta", "alpha"], SimToDistMethod::Linear),
+            ],
+        };
+
+        let err = series
+            .validate_for_as_input()
+            .expect_err("label mismatch should fail");
+        assert!(err.to_string().contains("labels do not match"));
+    }
+
+    #[test]
+    fn series_validate_for_as_input_rejects_mismatched_distance_mode() {
+        let series = MfSeriesOutput {
+            labels: vec!["alpha".into(), "beta".into()],
+            sim_to_dist: SimToDistMethod::Linear,
+            slices: vec![
+                slice("s1", &["alpha", "beta"], SimToDistMethod::Linear),
+                slice("s2", &["alpha", "beta"], SimToDistMethod::Cosine),
+            ],
+        };
+
+        let err = series
+            .validate_for_as_input()
+            .expect_err("distance mode mismatch should fail");
+        assert!(err.to_string().contains("sim_to_dist"));
     }
 }
 

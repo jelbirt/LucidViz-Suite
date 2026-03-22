@@ -8,6 +8,8 @@ use rust_xlsxwriter::{Format, Workbook};
 use crate::error::MfError;
 use crate::types::{MfOutput, MfSeriesOutput};
 
+const MAX_MF_JSON_BYTES: u64 = 128 * 1024 * 1024;
+
 /// Write the MF pipeline output as JSON.
 pub fn write_mf_json(output: &MfOutput, path: &Path) -> Result<()> {
     let json = serde_json::to_string_pretty(output)?;
@@ -20,6 +22,22 @@ pub fn write_mf_series_json(output: &MfSeriesOutput, path: &Path) -> Result<()> 
     let json = serde_json::to_string_pretty(output)?;
     atomic_write(path, json.as_bytes())?;
     Ok(())
+}
+
+/// Read the MF pipeline output from JSON with a bounded file-size check.
+pub fn read_mf_json(path: &Path) -> Result<MfOutput> {
+    let bytes = read_bounded_file(path, MAX_MF_JSON_BYTES)?;
+    let output: MfOutput = serde_json::from_slice(&bytes)?;
+    output.validate()?;
+    Ok(output)
+}
+
+/// Read the MF temporal series output from JSON with a bounded file-size check.
+pub fn read_mf_series_json(path: &Path) -> Result<MfSeriesOutput> {
+    let bytes = read_bounded_file(path, MAX_MF_JSON_BYTES)?;
+    let output: MfSeriesOutput = serde_json::from_slice(&bytes)?;
+    output.validate()?;
+    Ok(output)
 }
 
 /// Write the MF pipeline output as an XLSX workbook with 5 sheets.
@@ -170,6 +188,19 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
+fn read_bounded_file(path: &Path, limit: u64) -> Result<Vec<u8>> {
+    let metadata = std::fs::metadata(path)?;
+    if metadata.len() > limit {
+        return Err(MfError::FileTooLarge {
+            path: path.display().to_string(),
+            bytes: metadata.len(),
+            limit,
+        }
+        .into());
+    }
+    Ok(std::fs::read(path)?)
+}
+
 fn temp_path(path: &Path) -> Result<std::path::PathBuf> {
     let file_name = path
         .file_name()
@@ -193,4 +224,53 @@ fn replace_file(tmp_path: &Path, path: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::SimToDistMethod;
+    use as_pipeline::types::CentralityReport;
+
+    fn sample_output() -> MfOutput {
+        MfOutput {
+            labels: vec!["alpha".into(), "beta".into()],
+            similarity_matrix: vec![1.0, 0.5, 0.5, 1.0],
+            sim_to_dist: SimToDistMethod::Linear,
+            nppmi_matrix: vec![1.0, 0.5, 0.5, 1.0],
+            raw_counts: vec![1, 2, 2, 1],
+            ppmi_matrix: vec![1.0, 0.5, 0.5, 1.0],
+            n: 2,
+            centrality: CentralityReport {
+                labels: vec!["alpha".into(), "beta".into()],
+                degree: vec![1.0, 1.0],
+                distance: vec![1.0, 1.0],
+                closeness: vec![1.0, 1.0],
+                betweenness: vec![0.0, 0.0],
+            },
+        }
+    }
+
+    #[test]
+    fn mf_json_roundtrip_file_is_bounded_and_validated() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("mf_output.json");
+        let output = sample_output();
+
+        write_mf_json(&output, &path).expect("write json");
+        let loaded = read_mf_json(&path).expect("read json");
+
+        assert_eq!(loaded.labels, output.labels);
+        assert_eq!(loaded.similarity_matrix, output.similarity_matrix);
+    }
+
+    #[test]
+    fn mf_json_reader_rejects_oversized_files() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("oversized.json");
+        std::fs::write(&path, vec![b'x'; 1024]).expect("write test file");
+
+        let err = read_bounded_file(&path, 16).expect_err("expected oversized file failure");
+        assert!(err.to_string().contains("exceeding limit"));
+    }
 }

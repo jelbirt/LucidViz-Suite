@@ -5,6 +5,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use mf_pipeline::output::{read_mf_json, read_mf_series_json};
 use mf_pipeline::pipeline::{run_mf_pipeline, run_mf_series_pipeline};
 use mf_pipeline::types::{
     MfConfig, MfOutput, MfPipelineConfig, MfSeriesOutput, MfSliceMode, SimToDistMethod,
@@ -378,17 +379,11 @@ fn default_mf_output_dir() -> PathBuf {
 }
 
 fn load_mf_output(path: &std::path::Path) -> Result<MfOutput, String> {
-    let json = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let output: MfOutput = serde_json::from_str(&json).map_err(|e| e.to_string())?;
-    output.validate().map_err(|e| e.to_string())?;
-    Ok(output)
+    read_mf_json(path).map_err(|e| e.to_string())
 }
 
 fn load_mf_series_output(path: &std::path::Path) -> Result<MfSeriesOutput, String> {
-    let json = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let output: MfSeriesOutput = serde_json::from_str(&json).map_err(|e| e.to_string())?;
-    output.validate().map_err(|e| e.to_string())?;
-    Ok(output)
+    read_mf_series_json(path).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

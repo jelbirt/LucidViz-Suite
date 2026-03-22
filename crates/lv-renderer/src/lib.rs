@@ -54,11 +54,24 @@ pub struct EdgeUniforms {
 /// tests. Blocks the calling thread (uses `pollster`).
 #[cfg(any(test, feature = "headless"))]
 pub fn render_headless(frame: &lv_data::LisFrame, width: u32, height: u32) -> Vec<u8> {
+    try_render_headless(frame, width, height).expect("headless render failed")
+}
+
+#[cfg(any(test, feature = "headless"))]
+pub fn try_render_headless(
+    frame: &lv_data::LisFrame,
+    width: u32,
+    height: u32,
+) -> anyhow::Result<Vec<u8>> {
     pollster::block_on(render_headless_async(frame, width, height))
 }
 
 #[cfg(any(test, feature = "headless"))]
-async fn render_headless_async(frame: &lv_data::LisFrame, width: u32, height: u32) -> Vec<u8> {
+async fn render_headless_async(
+    frame: &lv_data::LisFrame,
+    width: u32,
+    height: u32,
+) -> anyhow::Result<Vec<u8>> {
     use wgpu::util::DeviceExt;
 
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
@@ -73,7 +86,7 @@ async fn render_headless_async(frame: &lv_data::LisFrame, width: u32, height: u3
             force_fallback_adapter: false,
         })
         .await
-        .expect("no headless adapter");
+        .map_err(|err| anyhow::anyhow!("no headless adapter: {err}"))?;
 
     let (device, queue) = adapter
         .request_device(&wgpu::DeviceDescriptor {
@@ -85,7 +98,7 @@ async fn render_headless_async(frame: &lv_data::LisFrame, width: u32, height: u3
             experimental_features: wgpu::ExperimentalFeatures::disabled(),
         })
         .await
-        .expect("headless device");
+        .map_err(|err| anyhow::anyhow!("headless device request failed: {err}"))?;
 
     // Render target texture
     let texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -323,8 +336,11 @@ async fn render_headless_async(frame: &lv_data::LisFrame, width: u32, height: u3
             submission_index: None,
             timeout: None,
         })
-        .expect("device poll failed");
-    rx.recv().unwrap().expect("readback map failed");
+        .map_err(|err| anyhow::anyhow!("device poll failed: {err}"))?;
+    let map_result = rx
+        .recv()
+        .map_err(|err| anyhow::anyhow!("readback completion channel failed: {err}"))?;
+    map_result.map_err(|err| anyhow::anyhow!("readback map failed: {err}"))?;
 
     let raw = slice.get_mapped_range();
     let mut pixels = Vec::with_capacity((width * height * 4) as usize);
@@ -334,5 +350,5 @@ async fn render_headless_async(frame: &lv_data::LisFrame, width: u32, height: u3
     }
     drop(raw);
     readback.unmap();
-    pixels
+    Ok(pixels)
 }

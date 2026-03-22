@@ -182,7 +182,7 @@ pub fn mf_series_output_to_as_input(
     output: &MfSeriesOutput,
     options: MfSeriesAsInputOptions,
 ) -> Result<AsDistancePipelineInput> {
-    output.validate()?;
+    output.validate_for_as_input()?;
     let datasets = output
         .slices
         .iter()
