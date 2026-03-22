@@ -180,6 +180,14 @@ impl MfOutput {
             );
         }
 
+        validate_similarity_matrix("similarity_matrix", &self.similarity_matrix, self.n)?;
+        validate_similarity_matrix("nppmi_matrix", &self.nppmi_matrix, self.n)?;
+        validate_finite_matrix("ppmi_matrix", &self.ppmi_matrix, self.n)?;
+        validate_finite_vector("centrality.degree", &self.centrality.degree)?;
+        validate_finite_vector("centrality.distance", &self.centrality.distance)?;
+        validate_finite_vector("centrality.closeness", &self.centrality.closeness)?;
+        validate_finite_vector("centrality.betweenness", &self.centrality.betweenness)?;
+
         Ok(())
     }
 }
@@ -351,6 +359,41 @@ mod tests {
             .expect_err("distance mode mismatch should fail");
         assert!(err.to_string().contains("sim_to_dist"));
     }
+
+    #[test]
+    fn mf_output_validate_rejects_nonfinite_similarity() {
+        let mut output = output(&["alpha", "beta"], SimToDistMethod::Linear);
+        output.similarity_matrix = vec![1.0, f64::NAN, f64::NAN, 1.0];
+
+        let err = output
+            .validate()
+            .expect_err("nonfinite similarity should fail");
+        assert!(err
+            .to_string()
+            .contains("similarity_matrix[0,1] is not finite"));
+    }
+
+    #[test]
+    fn mf_output_validate_rejects_out_of_range_similarity() {
+        let mut output = output(&["alpha", "beta"], SimToDistMethod::Linear);
+        output.similarity_matrix = vec![1.0, 1.2, 1.2, 1.0];
+
+        let err = output
+            .validate()
+            .expect_err("out-of-range similarity should fail");
+        assert!(err.to_string().contains("must be in [0, 1]"));
+    }
+
+    #[test]
+    fn mf_output_validate_rejects_asymmetric_similarity() {
+        let mut output = output(&["alpha", "beta"], SimToDistMethod::Linear);
+        output.similarity_matrix = vec![1.0, 0.4, 0.7, 1.0];
+
+        let err = output
+            .validate()
+            .expect_err("asymmetric similarity should fail");
+        assert!(err.to_string().contains("not symmetric"));
+    }
 }
 
 fn validate_square_len(name: &str, len: usize, n: usize) -> Result<()> {
@@ -359,6 +402,48 @@ fn validate_square_len(name: &str, len: usize, n: usize) -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("MF output size overflow for {} labels", n))?;
     if len != expected {
         bail!("MF output {name} expected {expected} values for {n} labels, got {len}");
+    }
+    Ok(())
+}
+
+fn validate_finite_vector(name: &str, values: &[f64]) -> Result<()> {
+    for (idx, value) in values.iter().copied().enumerate() {
+        if !value.is_finite() {
+            bail!("MF output {name}[{idx}] is not finite");
+        }
+    }
+    Ok(())
+}
+
+fn validate_finite_matrix(name: &str, values: &[f64], n: usize) -> Result<()> {
+    for i in 0..n {
+        for j in 0..n {
+            let value = values[i * n + j];
+            if !value.is_finite() {
+                bail!("MF output {name}[{i},{j}] is not finite");
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_similarity_matrix(name: &str, values: &[f64], n: usize) -> Result<()> {
+    validate_finite_matrix(name, values, n)?;
+    for i in 0..n {
+        for j in 0..n {
+            let value = values[i * n + j];
+            if !(0.0..=1.0).contains(&value) {
+                bail!("MF output {name}[{i},{j}] must be in [0, 1], got {value}");
+            }
+            if j > i {
+                let other = values[j * n + i];
+                if (value - other).abs() > 1e-12 {
+                    bail!(
+                        "MF output {name} is not symmetric at [{i},{j}] ({value}) and [{j},{i}] ({other})"
+                    );
+                }
+            }
+        }
     }
     Ok(())
 }

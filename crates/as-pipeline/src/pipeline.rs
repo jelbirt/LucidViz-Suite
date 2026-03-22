@@ -163,10 +163,39 @@ pub fn mf_output_to_distance_matrix(
             similarity_matrix.len()
         )));
     }
-    let data: Vec<f64> = similarity_matrix
-        .iter()
-        .map(|&s| sim_to_dist(s, method))
-        .collect();
+    for i in 0..n {
+        for j in 0..n {
+            let value = similarity_matrix[i * n + j];
+            if !value.is_finite() {
+                bail!(crate::error::AsError::InvalidMatrix(format!(
+                    "similarity[{i},{j}] is not finite"
+                )));
+            }
+            if !(0.0..=1.0).contains(&value) {
+                bail!(crate::error::AsError::InvalidMatrix(format!(
+                    "similarity[{i},{j}] must be in [0, 1], got {value}"
+                )));
+            }
+            if j > i {
+                let other = similarity_matrix[j * n + i];
+                if (value - other).abs() > 1e-12 {
+                    bail!(crate::error::AsError::InvalidMatrix(format!(
+                        "similarity matrix is not symmetric at [{i},{j}] ({value}) and [{j},{i}] ({other})"
+                    )));
+                }
+            }
+        }
+    }
+    let mut data = Vec::with_capacity(n * n);
+    for i in 0..n {
+        for j in 0..n {
+            if i == j {
+                data.push(0.0);
+            } else {
+                data.push(sim_to_dist(similarity_matrix[i * n + j], method));
+            }
+        }
+    }
     Ok(DistanceMatrix::new(labels, data)?)
 }
 
@@ -590,6 +619,54 @@ mod tests {
         .expect_err("invalid matrix shape must fail");
 
         assert!(err.to_string().contains("expected 4 values"));
+    }
+
+    #[test]
+    fn mf_output_to_distance_matrix_rejects_out_of_range_similarity() {
+        let err = mf_output_to_distance_matrix(
+            vec!["alpha".into(), "beta".into()],
+            &[1.0, 1.5, 1.5, 1.0],
+            2,
+            lv_data::SimToDistMethod::Linear,
+        )
+        .expect_err("out-of-range similarities must fail");
+
+        assert!(err.to_string().contains("must be in [0, 1]"));
+    }
+
+    #[test]
+    fn mf_output_to_distance_matrix_rejects_asymmetric_similarity() {
+        let err = mf_output_to_distance_matrix(
+            vec!["alpha".into(), "beta".into()],
+            &[1.0, 0.25, 0.75, 1.0],
+            2,
+            lv_data::SimToDistMethod::Linear,
+        )
+        .expect_err("asymmetric similarities must fail");
+
+        assert!(err.to_string().contains("not symmetric"));
+    }
+
+    #[test]
+    fn distance_matrix_rejects_nonzero_diagonal() {
+        let err = DistanceMatrix::new(
+            vec!["alpha".into(), "beta".into()],
+            vec![1.0, 0.25, 0.25, 0.0],
+        )
+        .expect_err("nonzero diagonal must fail");
+
+        assert!(err.to_string().contains("diagonal"));
+    }
+
+    #[test]
+    fn distance_matrix_rejects_asymmetry() {
+        let err = DistanceMatrix::new(
+            vec!["alpha".into(), "beta".into()],
+            vec![0.0, 0.25, 0.75, 0.0],
+        )
+        .expect_err("asymmetric distance matrix must fail");
+
+        assert!(err.to_string().contains("not symmetric"));
     }
 
     #[test]

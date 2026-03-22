@@ -29,6 +29,34 @@ impl DistanceMatrix {
                 data.len()
             )));
         }
+        for i in 0..n {
+            for j in 0..n {
+                let value = data[i * n + j];
+                if !value.is_finite() {
+                    return Err(AsError::InvalidMatrix(format!(
+                        "distance[{i},{j}] is not finite"
+                    )));
+                }
+                if value < 0.0 {
+                    return Err(AsError::InvalidMatrix(format!(
+                        "distance[{i},{j}] is negative: {value}"
+                    )));
+                }
+                if i == j && value.abs() > 1e-12 {
+                    return Err(AsError::InvalidMatrix(format!(
+                        "distance diagonal at [{i},{j}] must be 0, got {value}"
+                    )));
+                }
+                if j > i {
+                    let other = data[j * n + i];
+                    if (value - other).abs() > 1e-12 {
+                        return Err(AsError::InvalidMatrix(format!(
+                            "distance matrix is not symmetric at [{i},{j}] ({value}) and [{j},{i}] ({other})"
+                        )));
+                    }
+                }
+            }
+        }
         Ok(DistanceMatrix { labels, data, n })
     }
 

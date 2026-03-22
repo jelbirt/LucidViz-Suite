@@ -391,11 +391,11 @@ struct Renderer {
 }
 
 impl Renderer {
-    fn new(window: &Window) -> anyhow::Result<Self> {
+    fn new(window: &Window, prefs: UserPreferences) -> anyhow::Result<Self> {
         let ctx = WgpuContext::new(window)?;
 
         let dataset = make_demo_dataset();
-        let lis_config = LisConfig::default();
+        let lis_config = lis_config_from_prefs(&prefs);
         let lis_buffer = build_lis_buffer(&dataset, &lis_config);
         let mut app_state = AppState::new();
         app_state.dataset = Some(dataset.clone());
@@ -642,7 +642,7 @@ impl Renderer {
             edge_uniform_buf,
             window_size: (size.width, size.height),
             last_click_pos: None,
-            prefs: UserPreferences::load(),
+            prefs,
             notifications: NotificationQueue::default(),
         })
     }
@@ -752,6 +752,12 @@ impl Renderer {
         if self.app_state.dataset_changed {
             if let Some(ds) = self.app_state.dataset.clone() {
                 self.dataset = ds;
+            }
+            if let Some(path) = self.app_state.source_path.clone() {
+                self.prefs.push_recent(path);
+                if let Err(err) = self.prefs.save() {
+                    log::warn!("Failed to save prefs after dataset load: {err:#}");
+                }
             }
             self.lis_config = self.app_state.lis_config.clone();
             self.rebuild_lis();
@@ -1112,11 +1118,21 @@ fn apply_object_override(
     instance
 }
 
+fn lis_config_from_prefs(prefs: &UserPreferences) -> LisConfig {
+    let mut config = LisConfig::default();
+    config.lis_value = prefs.default_lis.max(2);
+    config.target_fps = prefs.default_fps;
+    config
+}
+
 #[cfg(test)]
 mod runtime_tests {
-    use super::{advance_slice_index, apply_object_override};
+    use super::{advance_slice_index, apply_object_override, lis_config_from_prefs};
     use lv_data::{GpuInstance, ShapeKind};
     use lv_gui::state::{ObjectOverride, PlayState};
+    use std::path::PathBuf;
+
+    use crate::prefs::UserPreferences;
 
     #[test]
     fn advance_slice_index_respects_play_state_and_looping() {
@@ -1151,6 +1167,26 @@ mod runtime_tests {
         assert_eq!(updated.color, [0.9, 0.8, 0.7, 0.8]);
         assert_eq!(updated.size_alpha, 0.5);
     }
+
+    #[test]
+    fn lis_config_from_prefs_applies_defaults_safely() {
+        let prefs = UserPreferences {
+            recent_files: vec![PathBuf::from("/tmp/data.xlsx")],
+            window_width: 1600,
+            window_height: 900,
+            default_lis: 1,
+            default_fps: Some(24),
+            audio_port: None,
+            brandes_threads: None,
+        };
+
+        let config = lis_config_from_prefs(&prefs);
+
+        assert_eq!(config.lis_value, 2);
+        assert_eq!(config.target_fps, Some(24));
+        assert!(config.looping);
+        assert_eq!(config.speed, 1.0);
+    }
 }
 
 // ── winit ApplicationHandler ──────────────────────────────────────────────────
@@ -1158,6 +1194,7 @@ mod runtime_tests {
 struct App {
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
+    prefs: UserPreferences,
 }
 
 impl ApplicationHandler for App {
@@ -1167,7 +1204,10 @@ impl ApplicationHandler for App {
         }
         let attrs = Window::default_attributes()
             .with_title("Lucid Visualization Suite")
-            .with_inner_size(winit::dpi::LogicalSize::new(1280u32, 720u32));
+            .with_inner_size(winit::dpi::LogicalSize::new(
+                self.prefs.window_width,
+                self.prefs.window_height,
+            ));
         let window = match event_loop.create_window(attrs) {
             Ok(window) => Arc::new(window),
             Err(err) => {
@@ -1176,7 +1216,7 @@ impl ApplicationHandler for App {
                 return;
             }
         };
-        let renderer = match Renderer::new(&window) {
+        let renderer = match Renderer::new(&window, self.prefs.clone()) {
             Ok(renderer) => renderer,
             Err(err) => {
                 log::error!("Failed to initialize renderer: {err:#}");
@@ -1285,6 +1325,7 @@ fn main() {
     let mut app = App {
         window: None,
         renderer: None,
+        prefs: UserPreferences::load(),
     };
     if let Err(err) = event_loop.run_app(&mut app) {
         log::error!("Application event loop failed: {err:#}");

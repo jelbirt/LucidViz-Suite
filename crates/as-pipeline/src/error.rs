@@ -13,6 +13,9 @@ pub enum AsError {
     #[error("Matrix dimension mismatch: {0}")]
     DimensionMismatch(String),
 
+    #[error("Invalid matrix data: {0}")]
+    InvalidMatrix(String),
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
