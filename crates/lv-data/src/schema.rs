@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fmt;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -223,9 +224,10 @@ impl EtvDataset {
     /// Canonical deduplicated union of all row labels across all sheets.
     pub fn canonical_all_labels_from_sheets(sheets: &[EtvSheet]) -> Vec<String> {
         let mut all_labels = Vec::new();
+        let mut seen = HashSet::new();
         for sheet in sheets {
             for row in &sheet.rows {
-                if !all_labels.contains(&row.label) {
+                if seen.insert(row.label.clone()) {
                     all_labels.push(row.label.clone());
                 }
             }
