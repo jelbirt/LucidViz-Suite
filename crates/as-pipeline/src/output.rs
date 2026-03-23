@@ -6,7 +6,8 @@ use anyhow::{Context, Result};
 use rust_xlsxwriter::{Format, Workbook};
 
 use crate::types::{
-    AsPipelineResult, CentralityState, DistanceMatrix, MdsCoordinates, ProcrustesResult,
+    AsPipelineResult, CentralityMode, CentralityState, DistanceMatrix, MdsCoordinates,
+    ProcrustesResult,
 };
 
 /// Write the full AS pipeline result to a directory.
@@ -127,6 +128,7 @@ fn write_as_json(result: &AsPipelineResult, path: &Path) -> Result<()> {
         coordinates: &'a [MdsCoordinates],
         procrustes: &'a [ProcrustesResult],
         centralities: &'a [CentralityState],
+        centrality_mode: CentralityMode,
         distance_matrices: &'a [DistanceMatrix],
         etv_dataset: &'a lv_data::schema::EtvDataset,
     }
@@ -135,6 +137,7 @@ fn write_as_json(result: &AsPipelineResult, path: &Path) -> Result<()> {
         coordinates: &result.coordinates,
         procrustes: &result.procrustes,
         centralities: &result.centralities,
+        centrality_mode: result.centrality_mode,
         distance_matrices: &result.distance_matrices,
         etv_dataset: &result.etv_dataset,
     };
@@ -183,8 +186,8 @@ fn replace_file(tmp_path: &Path, path: &Path) -> Result<()> {
 mod tests {
     use super::write_as_json;
     use crate::types::{
-        AsPipelineResult, CentralityState, DistanceMatrix, MdsAlgorithm, MdsCoordinates,
-        ProcrustesResult,
+        AsPipelineResult, CentralityMode, CentralityState, DistanceMatrix, MdsAlgorithm,
+        MdsCoordinates, ProcrustesResult,
     };
     use lv_data::schema::EtvDataset;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -218,6 +221,7 @@ mod tests {
                 labels: vec!["alpha".into()],
                 reason: "none".into(),
             }],
+            centrality_mode: CentralityMode::Directed,
             distance_matrices: vec![DistanceMatrix::new(vec!["alpha".into()], vec![0.0])
                 .expect("test distance matrix should build")],
             etv_dataset: EtvDataset {
@@ -237,6 +241,7 @@ mod tests {
         let json = std::fs::read_to_string(&path).expect("json read failed");
         assert!(json.contains("\"procrustes\""));
         assert!(json.contains("\"etv_dataset\""));
+        assert!(json.contains("\"centrality_mode\""));
 
         let _ = std::fs::remove_file(path);
     }

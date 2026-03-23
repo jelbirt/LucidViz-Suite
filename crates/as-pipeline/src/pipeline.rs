@@ -16,6 +16,8 @@ use crate::types::{
     MdsCoordinates, NormalizationMode, ProcrustesMode, ProcrustesResult,
 };
 
+const INFO_DISTANCE_CAP: f64 = 1_000_000.0;
+
 /// Run the full AlignSpace pipeline.
 ///
 /// # Sequence
@@ -45,7 +47,7 @@ pub fn run_pipeline(input: &AsPipelineInput) -> Result<AsPipelineResult> {
         raw_coords.push(coords);
 
         // Compute centrality.
-        let centrality = compute_centrality(adj, &input.labels)?;
+        let centrality = compute_centrality(adj, &input.labels, input.centrality_mode)?;
         centralities.push(CentralityState::Computed(centrality));
 
         let _ = name; // used for future output naming
@@ -76,6 +78,7 @@ pub fn run_pipeline(input: &AsPipelineInput) -> Result<AsPipelineResult> {
         coordinates,
         procrustes: procrustes_results,
         centralities,
+        centrality_mode: input.centrality_mode,
         distance_matrices,
         etv_dataset,
     })
@@ -130,6 +133,7 @@ pub fn run_distance_pipeline(input: &AsDistancePipelineInput) -> Result<AsPipeli
         coordinates,
         procrustes: procrustes_results,
         centralities,
+        centrality_mode: input.centrality_mode,
         distance_matrices,
         etv_dataset,
     })
@@ -213,13 +217,15 @@ fn sim_to_dist(s: f64, method: SimToDistMethod) -> f64 {
     match method {
         SimToDistMethod::Linear => (1.0 - s).max(0.0),
         SimToDistMethod::Cosine => (1.0 - s * s).max(0.0).sqrt(),
-        SimToDistMethod::Info => {
-            if s <= 0.0 {
-                f64::INFINITY
-            } else {
-                -s.ln()
-            }
-        }
+        SimToDistMethod::Info => finite_info_distance(s),
+    }
+}
+
+fn finite_info_distance(s: f64) -> f64 {
+    if s <= 0.0 {
+        INFO_DISTANCE_CAP
+    } else {
+        (-s.ln()).min(INFO_DISTANCE_CAP)
     }
 }
 
@@ -670,6 +676,20 @@ mod tests {
     }
 
     #[test]
+    fn mf_output_to_distance_matrix_info_caps_zero_similarity() {
+        let matrix = mf_output_to_distance_matrix(
+            vec!["alpha".into(), "beta".into()],
+            &[1.0, 0.0, 0.0, 1.0],
+            2,
+            lv_data::SimToDistMethod::Info,
+        )
+        .expect("zero similarity should map to a finite capped distance");
+
+        assert!(matrix.get(0, 1).is_finite());
+        assert_eq!(matrix.get(0, 1), super::INFO_DISTANCE_CAP);
+    }
+
+    #[test]
     fn run_distance_pipeline_rejects_zero_node_matrices() {
         let input = crate::types::AsDistancePipelineInput {
             datasets: vec![(
@@ -683,6 +703,7 @@ mod tests {
             normalization_mode: crate::types::NormalizationMode::Independent,
             target_range: 300.0,
             procrustes_scale: true,
+            centrality_mode: crate::types::CentralityMode::Directed,
         };
 
         let err = run_distance_pipeline(&input).expect_err("zero-node inputs must fail");

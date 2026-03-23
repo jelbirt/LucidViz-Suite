@@ -5,6 +5,7 @@
 
 use anyhow::{bail, Result};
 use nalgebra::{DMatrix, SVD};
+use std::collections::HashMap;
 
 use crate::error::AsError;
 use crate::types::{MdsCoordinates, ProcrustesResult};
@@ -25,17 +26,17 @@ pub fn procrustes(
     let dims = source.dims.min(target.dims);
 
     // Find shared labels.
+    let target_index: HashMap<&str, usize> = target
+        .labels
+        .iter()
+        .enumerate()
+        .map(|(ti, label)| (label.as_str(), ti))
+        .collect();
     let shared_indices: Vec<(usize, usize)> = source
         .labels
         .iter()
         .enumerate()
-        .filter_map(|(si, lbl)| {
-            target
-                .labels
-                .iter()
-                .position(|t| t == lbl)
-                .map(|ti| (si, ti))
-        })
+        .filter_map(|(si, lbl)| target_index.get(lbl.as_str()).copied().map(|ti| (si, ti)))
         .collect();
 
     if shared_indices.len() < 2 {

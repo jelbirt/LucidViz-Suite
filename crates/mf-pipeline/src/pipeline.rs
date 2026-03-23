@@ -3,7 +3,8 @@
 use anyhow::{bail, Result};
 use as_pipeline::pipeline::mf_output_to_distance_matrix;
 use as_pipeline::types::{
-    AsDistancePipelineInput, MdsConfig, MdsDimMode, NormalizationMode, ProcrustesMode,
+    AsDistancePipelineInput, CentralityMode, MdsConfig, MdsDimMode, NormalizationMode,
+    ProcrustesMode,
 };
 
 use crate::centrality::compute_centrality_full;
@@ -175,6 +176,7 @@ pub struct MfSeriesAsInputOptions {
     pub normalization_mode: NormalizationMode,
     pub target_range: f64,
     pub procrustes_scale: bool,
+    pub centrality_mode: CentralityMode,
 }
 
 /// Convert MatrixForge series output into an AlignSpace multi-step distance input.
@@ -209,6 +211,7 @@ pub fn mf_series_output_to_as_input(
         normalization_mode: options.normalization_mode,
         target_range: options.target_range,
         procrustes_scale: options.procrustes_scale,
+        centrality_mode: options.centrality_mode,
     })
 }
 

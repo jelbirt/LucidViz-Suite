@@ -2,6 +2,7 @@
 
 //! `lv-data` — shared data model and XLSX/JSON I/O for the Lucid Visualization Suite.
 
+pub mod analysis;
 pub mod bridge;
 pub mod error;
 pub mod schema;
@@ -14,6 +15,7 @@ pub mod xlsx_reader;
 #[cfg(feature = "native-io")]
 pub mod xlsx_writer;
 
+pub use analysis::CentralityReport;
 pub use bridge::SimToDistMethod;
 pub use error::DataError;
 #[cfg(feature = "native-io")]

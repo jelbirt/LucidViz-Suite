@@ -8,14 +8,16 @@ use std::thread;
 use as_pipeline::output::write_as_results;
 use as_pipeline::pipeline::{mf_output_to_distance_matrix, run_distance_pipeline, run_pipeline};
 use as_pipeline::types::{
-    AsDistancePipelineInput, AsPipelineInput, AsPipelineResult, MdsConfig, MdsDimMode,
-    NormalizationMode, ProcrustesMode, SmacofConfig, SmacofInit,
+    AsDistancePipelineInput, AsPipelineInput, AsPipelineResult, CentralityMode, MdsConfig,
+    MdsDimMode, NormalizationMode, ProcrustesMode, SmacofConfig, SmacofInit,
 };
-use lv_data::{load_dataset_json, write_etv_json, EtvDataset};
+use lv_data::{write_etv_json, EtvDataset};
 use mf_pipeline::pipeline::{mf_series_output_to_as_input, MfSeriesAsInputOptions};
 use ndarray::Array2;
 
-use crate::state::{AppState, AsInputSource, PipelineEvent, PipelineJob};
+use crate::state::{
+    AppState, AsInputSource, AsRunOutcome, PipelineEvent, PipelineJob, PipelineOutcome,
+};
 
 /// Panel for configuring and launching the AlignSpace MDS pipeline.
 pub struct AsPanel {
@@ -26,6 +28,7 @@ pub struct AsPanel {
     normalize: bool,
     normalization_mode: NormalizationMode,
     norm_range: f64,
+    centrality_mode: CentralityMode,
     // SMACOF sub-config
     smacof_max_iter: u32,
     smacof_tol: f64,
@@ -60,6 +63,7 @@ impl Default for AsPanel {
             normalize: true,
             normalization_mode: NormalizationMode::Independent,
             norm_range: 300.0,
+            centrality_mode: CentralityMode::Directed,
             smacof_max_iter: 300,
             smacof_tol: 1e-6,
             smacof_random: false,
@@ -172,6 +176,24 @@ impl AsPanel {
             });
         }
 
+        egui::ComboBox::from_label("Centrality")
+            .selected_text(match self.centrality_mode {
+                CentralityMode::Directed => "Directed",
+                CentralityMode::UndirectedLegacy => "Undirected (legacy)",
+            })
+            .show_ui(ui, |ui| {
+                ui.selectable_value(
+                    &mut self.centrality_mode,
+                    CentralityMode::Directed,
+                    "Directed",
+                );
+                ui.selectable_value(
+                    &mut self.centrality_mode,
+                    CentralityMode::UndirectedLegacy,
+                    "Undirected (legacy)",
+                );
+            });
+
         // ── Output dir ─────────────────────────────────────────────────────
         ui.separator();
         ui.horizontal(|ui| {
@@ -190,7 +212,7 @@ impl AsPanel {
 
         // ── Run button ─────────────────────────────────────────────────────
         let has_input = match state.as_input_source {
-            AsInputSource::Dataset => state.dataset.is_some(),
+            AsInputSource::Dataset => state.dataset().is_some(),
             AsInputSource::MatrixForge => state.mf_output.is_some(),
             AsInputSource::MatrixForgeSeries => state.mf_series_output.is_some(),
         };
@@ -213,7 +235,7 @@ impl AsPanel {
 
             match state.as_input_source {
                 AsInputSource::Dataset => {
-                    if let Some(ds) = state.dataset.clone() {
+                    if let Some(ds) = state.dataset().cloned() {
                         self.launch_dataset_job(&ds, out, state);
                     }
                 }
@@ -236,25 +258,22 @@ impl AsPanel {
                 ui.add(egui::ProgressBar::new(job.last_pct).text(&job.last_step));
             } else if let Some(result) = &job.result {
                 match result {
-                    Ok(path) => {
-                        self.status = format!("Done: {}", path.display());
-                        if ui.button("Load output into LV").clicked() {
-                            match load_etv_dataset(path) {
-                                Ok(dataset) => {
-                                    state.dataset = Some(dataset);
-                                    state.source_path = Some(path.clone());
-                                    state.as_input_source = AsInputSource::Dataset;
-                                    state.slice_index = 0;
-                                    state.dataset_changed = true;
-                                    state.load_error = None;
-                                    self.status = "AlignSpace output loaded into LV.".into();
-                                }
-                                Err(e) => {
-                                    state.load_error = Some(e.clone());
-                                    self.status = format!("Error: {e}");
-                                }
-                            }
+                    Ok(PipelineOutcome::AsRun(outcome)) => {
+                        self.status = format!("Done: {}", outcome.dataset_path.display());
+                        if !outcome.warnings.is_empty() {
+                            ui.separator();
+                            ui.label(format!("Warnings: {}", outcome.warnings.join(" | ")));
                         }
+                        if ui.button("Load output into LV").clicked() {
+                            state.queue_dataset_load(
+                                outcome.dataset.clone(),
+                                outcome.dataset_path.clone(),
+                            );
+                            self.status = "AlignSpace output loaded into LV.".into();
+                        }
+                    }
+                    Ok(PipelineOutcome::File(_)) => {
+                        self.status = "Unexpected pipeline output type.".into();
                     }
                     Err(e) => {
                         self.status = format!("Error: {e}");
@@ -312,15 +331,10 @@ impl AsPanel {
         let normalize = self.normalize;
         let normalization_mode = self.normalization_mode;
         let target_range = self.norm_range;
+        let centrality_mode = self.centrality_mode;
 
         thread::spawn(move || {
-            if !dropped_edges.is_empty() {
-                eprintln!(
-                    "AlignSpace skipped {} edge(s) with unknown labels: {}",
-                    dropped_edges.len(),
-                    dropped_edges.join(", ")
-                );
-            }
+            let warnings = dropped_edge_warnings(&dropped_edges);
             let _ = tx.send(PipelineEvent::Progress {
                 step: "Computing MDS…".into(),
                 pct: 0.1,
@@ -335,6 +349,7 @@ impl AsPanel {
                 normalization_mode,
                 target_range,
                 procrustes_scale: true,
+                centrality_mode,
             };
             match run_pipeline(&input) {
                 Ok(mut result) => {
@@ -343,8 +358,8 @@ impl AsPanel {
                         step: "Writing output…".into(),
                         pct: 0.9,
                     });
-                    let result = write_gui_output_artifacts(&result, &output_dir);
-                    let _ = tx.send(PipelineEvent::Done(result));
+                    let result = write_gui_output_artifacts(&result, &output_dir, &warnings);
+                    let _ = tx.send(PipelineEvent::Done(result.map(PipelineOutcome::AsRun)));
                 }
                 Err(e) => {
                     let _ = tx.send(PipelineEvent::Done(Err(e.to_string())));
@@ -375,6 +390,7 @@ impl AsPanel {
         let normalize = self.normalize;
         let normalization_mode = self.normalization_mode;
         let target_range = self.norm_range;
+        let centrality_mode = self.centrality_mode;
 
         thread::spawn(move || {
             let _ = tx.send(PipelineEvent::Progress {
@@ -390,6 +406,7 @@ impl AsPanel {
                 normalize,
                 normalization_mode,
                 target_range,
+                centrality_mode,
             ) {
                 Ok(input) => input,
                 Err(e) => {
@@ -400,8 +417,8 @@ impl AsPanel {
 
             match run_distance_pipeline(&input) {
                 Ok(result) => {
-                    let result = write_gui_output_artifacts(&result, &output_dir);
-                    let _ = tx.send(PipelineEvent::Done(result));
+                    let result = write_gui_output_artifacts(&result, &output_dir, &[]);
+                    let _ = tx.send(PipelineEvent::Done(result.map(PipelineOutcome::AsRun)));
                 }
                 Err(e) => {
                     let _ = tx.send(PipelineEvent::Done(Err(e.to_string())));
@@ -432,6 +449,7 @@ impl AsPanel {
         let normalize = self.normalize;
         let normalization_mode = self.normalization_mode;
         let target_range = self.norm_range;
+        let centrality_mode = self.centrality_mode;
 
         thread::spawn(move || {
             let _ = tx.send(PipelineEvent::Progress {
@@ -449,6 +467,7 @@ impl AsPanel {
                     normalization_mode,
                     target_range,
                     procrustes_scale: true,
+                    centrality_mode,
                 },
             ) {
                 Ok(input) => input,
@@ -460,8 +479,8 @@ impl AsPanel {
 
             match run_distance_pipeline(&input) {
                 Ok(result) => {
-                    let result = write_gui_output_artifacts(&result, &output_dir);
-                    let _ = tx.send(PipelineEvent::Done(result));
+                    let result = write_gui_output_artifacts(&result, &output_dir, &[]);
+                    let _ = tx.send(PipelineEvent::Done(result.map(PipelineOutcome::AsRun)));
                 }
                 Err(e) => {
                     let _ = tx.send(PipelineEvent::Done(Err(e.to_string())));
@@ -514,6 +533,7 @@ fn build_mf_distance_input(
     normalize: bool,
     normalization_mode: NormalizationMode,
     target_range: f64,
+    centrality_mode: CentralityMode,
 ) -> Result<AsDistancePipelineInput, String> {
     mf_output
         .validate()
@@ -535,6 +555,7 @@ fn build_mf_distance_input(
         normalization_mode,
         target_range,
         procrustes_scale: true,
+        centrality_mode,
     })
 }
 
@@ -579,20 +600,42 @@ fn build_dataset_adjacencies(
     (datasets, dropped_edges.into_iter().collect())
 }
 
+fn dropped_edge_warnings(dropped_edges: &[String]) -> Vec<String> {
+    if dropped_edges.is_empty() {
+        Vec::new()
+    } else {
+        vec![format!(
+            "AlignSpace skipped {} edge(s) with unknown labels: {}",
+            dropped_edges.len(),
+            dropped_edges.join(", ")
+        )]
+    }
+}
+
+fn write_warnings_file(output_dir: &std::path::Path, warnings: &[String]) -> Result<(), String> {
+    if warnings.is_empty() {
+        return Ok(());
+    }
+    std::fs::create_dir_all(output_dir).map_err(|e| e.to_string())?;
+    std::fs::write(output_dir.join("warnings.txt"), warnings.join("\n")).map_err(|e| e.to_string())
+}
+
 fn write_gui_output_artifacts(
     result: &AsPipelineResult,
     output_dir: &std::path::Path,
-) -> Result<PathBuf, String> {
+    warnings: &[String],
+) -> Result<AsRunOutcome, String> {
     write_as_results(result, output_dir).map_err(|e| e.to_string())?;
 
     let dataset_path = output_dir.join("etv_dataset.json");
     write_etv_json(&result.etv_dataset, &dataset_path).map_err(|e| e.to_string())?;
+    write_warnings_file(output_dir, warnings)?;
 
-    Ok(dataset_path)
-}
-
-fn load_etv_dataset(path: &std::path::Path) -> Result<EtvDataset, String> {
-    load_dataset_json(path).map_err(|e| e.to_string())
+    Ok(AsRunOutcome {
+        dataset: result.etv_dataset.clone(),
+        dataset_path,
+        warnings: warnings.to_vec(),
+    })
 }
 
 #[cfg(test)]
@@ -603,8 +646,8 @@ mod tests {
     };
     use as_pipeline::types::CentralityReport;
     use as_pipeline::types::{
-        AsPipelineResult, CentralityState, DistanceMatrix, MdsAlgorithm, MdsCoordinates,
-        ProcrustesResult,
+        AsPipelineResult, CentralityMode, CentralityState, DistanceMatrix, MdsAlgorithm,
+        MdsCoordinates, ProcrustesResult,
     };
     use as_pipeline::types::{MdsConfig, MdsDimMode, NormalizationMode, ProcrustesMode};
     use lv_data::schema::{EdgeRow, EtvDataset, EtvRow, EtvSheet};
@@ -752,6 +795,7 @@ mod tests {
             true,
             NormalizationMode::Independent,
             300.0,
+            CentralityMode::Directed,
         )
         .expect("valid MF output should convert");
 
@@ -791,6 +835,7 @@ mod tests {
                 labels: vec!["alpha".into()],
                 reason: "distance-only".into(),
             }],
+            centrality_mode: CentralityMode::Directed,
             distance_matrices: vec![DistanceMatrix::new(vec!["alpha".into()], vec![0.0])
                 .expect("test distance matrix should build")],
             etv_dataset: EtvDataset {
@@ -814,11 +859,11 @@ mod tests {
             .as_nanos();
         let out_dir = std::env::temp_dir().join(format!("as-panel-artifacts-{stamp}"));
 
-        let dataset_path =
-            write_gui_output_artifacts(&result, &out_dir).expect("artifacts should write");
+        let outcome =
+            write_gui_output_artifacts(&result, &out_dir, &[]).expect("artifacts should write");
 
         assert_eq!(
-            dataset_path.file_name().and_then(|s| s.to_str()),
+            outcome.dataset_path.file_name().and_then(|s| s.to_str()),
             Some("etv_dataset.json")
         );
 
@@ -828,7 +873,7 @@ mod tests {
         assert!(as_result_json.contains("\"etv_dataset\""));
 
         let dataset_json =
-            std::fs::read_to_string(&dataset_path).expect("etv dataset json should exist");
+            std::fs::read_to_string(&outcome.dataset_path).expect("etv dataset json should exist");
         assert!(dataset_json.contains("\"all_labels\""));
         assert!(!dataset_json.contains("\"procrustes\""));
 
@@ -862,6 +907,7 @@ mod tests {
             true,
             NormalizationMode::Independent,
             300.0,
+            CentralityMode::Directed,
         )
         .expect_err("invalid MF output must fail");
 
@@ -905,6 +951,7 @@ mod tests {
             coordinates: vec![],
             procrustes: vec![],
             centralities: vec![],
+            centrality_mode: CentralityMode::Directed,
             distance_matrices: vec![],
             etv_dataset: EtvDataset {
                 source_path: None,

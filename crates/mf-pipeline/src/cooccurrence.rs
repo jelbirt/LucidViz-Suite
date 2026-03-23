@@ -102,11 +102,11 @@ fn build_cooccurrence_for_vocab(
         v
     };
 
-    let partial_matrices: Vec<Vec<u64>> = chunks
+    let partial_matrices: Vec<HashMap<usize, u64>> = chunks
         .par_iter()
         .zip(chunk_starts.par_iter())
         .map(|(chunk, &chunk_start)| {
-            let mut mat = vec![0u64; n * n];
+            let mut mat = HashMap::<usize, u64>::new();
             let len = chunk.len();
             let local_center_end = (chunk_size).min(len);
             let mut pos = if slide > 1 {
@@ -124,7 +124,7 @@ fn build_cooccurrence_for_vocab(
                             continue;
                         }
                         if let Some(&cj) = vocab_index.get(chunk[other_pos].as_str()) {
-                            mat[ci * n + cj] += 1;
+                            *mat.entry(ci * n + cj).or_insert(0) += 1;
                         }
                     }
                 }
@@ -137,7 +137,7 @@ fn build_cooccurrence_for_vocab(
     // Sum partial matrices.
     let mut total_mat = vec![0u64; n * n];
     for partial in partial_matrices {
-        for (i, &v) in partial.iter().enumerate() {
+        for (i, v) in partial {
             total_mat[i] += v;
         }
     }

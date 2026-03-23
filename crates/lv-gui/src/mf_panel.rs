@@ -11,7 +11,7 @@ use mf_pipeline::types::{
     MfConfig, MfOutput, MfPipelineConfig, MfSeriesOutput, MfSliceMode, SimToDistMethod,
 };
 
-use crate::state::{AppState, AsInputSource, PipelineEvent, PipelineJob};
+use crate::state::{AppState, AsInputSource, PipelineEvent, PipelineJob, PipelineOutcome};
 
 /// Panel for configuring and launching the MatrixForge text-analysis pipeline.
 pub struct MfPanel {
@@ -218,7 +218,7 @@ impl MfPanel {
                 ui.add(egui::ProgressBar::new(job.last_pct).text(&job.last_step));
             } else if let Some(result) = &job.result {
                 match result {
-                    Ok(path) => {
+                    Ok(PipelineOutcome::File(path)) => {
                         self.status = format!("Done: {}", path.display());
                         if ui.button("Send output to AlignSpace").clicked() {
                             match self.slice_mode {
@@ -252,6 +252,9 @@ impl MfPanel {
                                 },
                             }
                         }
+                    }
+                    Ok(PipelineOutcome::AsRun(_)) => {
+                        self.status = "Unexpected pipeline output type.".into();
                     }
                     Err(e) => {
                         self.status = format!("Error: {e}");
@@ -305,7 +308,7 @@ impl MfPanel {
                     } else {
                         output_dir.join("mf_output.json")
                     };
-                    let _ = tx.send(PipelineEvent::Done(Ok(out_path)));
+                    let _ = tx.send(PipelineEvent::Done(Ok(PipelineOutcome::File(out_path))));
                 }
                 Err(e) => {
                     let _ = tx.send(PipelineEvent::Done(Err(e.to_string())));

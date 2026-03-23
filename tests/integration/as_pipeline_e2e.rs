@@ -7,7 +7,8 @@
 use as_pipeline::{
     pipeline::run_pipeline,
     types::{
-        AsPipelineInput, CentralityState, MdsConfig, MdsDimMode, NormalizationMode, ProcrustesMode,
+        AsPipelineInput, CentralityMode, CentralityState, MdsConfig, MdsDimMode, NormalizationMode,
+        ProcrustesMode,
     },
 };
 use ndarray::Array2;
@@ -65,6 +66,7 @@ fn test_as_pipeline_e2e_single_timestep() {
         normalization_mode: NormalizationMode::Independent,
         target_range: 1.0,
         procrustes_scale: false,
+        centrality_mode: CentralityMode::UndirectedLegacy,
     };
 
     let result = run_pipeline(&input).expect("pipeline failed");
@@ -140,6 +142,7 @@ fn test_as_pipeline_e2e_two_timesteps() {
         normalization_mode: NormalizationMode::Independent,
         target_range: 1.0,
         procrustes_scale: false,
+        centrality_mode: CentralityMode::UndirectedLegacy,
     };
 
     let result = run_pipeline(&input).expect("pipeline failed (two time steps)");
@@ -186,6 +189,7 @@ fn test_as_pipeline_optimal_choice_runs_and_preserves_labels() {
         normalization_mode: NormalizationMode::Independent,
         target_range: 1.0,
         procrustes_scale: false,
+        centrality_mode: CentralityMode::UndirectedLegacy,
     };
 
     let result = run_pipeline(&input).expect("optimal choice pipeline failed");
@@ -224,6 +228,7 @@ fn test_as_pipeline_3d_export_preserves_z_coordinates() {
         normalization_mode: NormalizationMode::Independent,
         target_range: 1.0,
         procrustes_scale: false,
+        centrality_mode: CentralityMode::UndirectedLegacy,
     };
 
     let result = run_pipeline(&input).expect("3d pipeline failed");
@@ -256,6 +261,7 @@ fn test_as_pipeline_global_normalization_preserves_relative_scale() {
         normalization_mode: NormalizationMode::Global,
         target_range: 2.0,
         procrustes_scale: false,
+        centrality_mode: CentralityMode::UndirectedLegacy,
     })
     .expect("global normalization pipeline failed");
 
@@ -297,6 +303,7 @@ fn test_as_pipeline_time_series_anchored_uses_first_slice_as_reference() {
         normalization_mode: NormalizationMode::Independent,
         target_range: 1.0,
         procrustes_scale: false,
+        centrality_mode: CentralityMode::UndirectedLegacy,
     })
     .expect("anchored time series pipeline failed");
 
@@ -322,6 +329,7 @@ fn test_as_pipeline_preserves_directed_edges_in_etv_output() {
         normalization_mode: NormalizationMode::Independent,
         target_range: 1.0,
         procrustes_scale: false,
+        centrality_mode: CentralityMode::UndirectedLegacy,
     })
     .expect("directed pipeline failed");
 

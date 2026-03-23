@@ -323,6 +323,7 @@ fn test_mf_series_pipeline_bridges_to_as_distance_pipeline() {
             normalization_mode: NormalizationMode::Independent,
             target_range: 300.0,
             procrustes_scale: true,
+            centrality_mode: as_pipeline::types::CentralityMode::Directed,
         },
     )
     .expect("series conversion failed");
@@ -373,6 +374,7 @@ fn test_single_output_and_single_slice_series_produce_same_distance_dataset() {
         normalization_mode: NormalizationMode::Independent,
         target_range: 300.0,
         procrustes_scale: true,
+        centrality_mode: as_pipeline::types::CentralityMode::Directed,
     };
     let single_result =
         run_distance_pipeline(&single_input).expect("single distance pipeline failed");
@@ -399,6 +401,7 @@ fn test_single_output_and_single_slice_series_produce_same_distance_dataset() {
             normalization_mode: NormalizationMode::Independent,
             target_range: 300.0,
             procrustes_scale: true,
+            centrality_mode: as_pipeline::types::CentralityMode::Directed,
         },
     )
     .expect("series conversion failed");

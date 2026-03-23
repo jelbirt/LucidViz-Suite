@@ -10,7 +10,7 @@ use rayon::prelude::*;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
-use as_pipeline::types::CentralityReport;
+use lv_data::CentralityReport;
 
 /// Compute degree, distance, closeness, and betweenness centrality from a
 /// petgraph co-occurrence graph.

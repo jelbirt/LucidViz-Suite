@@ -1,6 +1,7 @@
 //! Core types for the AlignSpace pipeline.
 
 use crate::error::AsError;
+pub use lv_data::analysis::CentralityReport;
 use lv_data::schema::EtvDataset;
 use ndarray::Array2;
 use serde::{Deserialize, Serialize};
@@ -149,13 +150,10 @@ pub struct ProcrustesResult {
 // Centrality
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CentralityReport {
-    pub labels: Vec<String>,
-    pub degree: Vec<f64>,
-    pub distance: Vec<f64>,
-    pub closeness: Vec<f64>,
-    pub betweenness: Vec<f64>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CentralityMode {
+    UndirectedLegacy,
+    Directed,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -248,6 +246,7 @@ pub struct AsPipelineInput {
     pub normalization_mode: NormalizationMode,
     pub target_range: f64,
     pub procrustes_scale: bool,
+    pub centrality_mode: CentralityMode,
 }
 
 #[derive(Debug, Clone)]
@@ -261,6 +260,7 @@ pub struct AsDistancePipelineInput {
     pub normalization_mode: NormalizationMode,
     pub target_range: f64,
     pub procrustes_scale: bool,
+    pub centrality_mode: CentralityMode,
 }
 
 #[derive(Debug)]
@@ -268,6 +268,7 @@ pub struct AsPipelineResult {
     pub coordinates: Vec<MdsCoordinates>,
     pub procrustes: Vec<ProcrustesResult>,
     pub centralities: Vec<CentralityState>,
+    pub centrality_mode: CentralityMode,
     pub distance_matrices: Vec<DistanceMatrix>,
     pub etv_dataset: EtvDataset,
 }

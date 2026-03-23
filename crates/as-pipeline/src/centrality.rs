@@ -6,7 +6,6 @@
 //! Betweenness uses a weighted parallel Brandes algorithm via rayon.
 
 use ndarray::Array2;
-use petgraph::algo::dijkstra;
 use petgraph::graph::{NodeIndex, UnGraph};
 use petgraph::visit::EdgeRef;
 use rayon::prelude::*;
@@ -14,21 +13,19 @@ use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
 use crate::error::AsError;
-use crate::types::CentralityReport;
+use crate::types::CentralityMode;
+use lv_data::analysis::CentralityReport;
 
-/// Compute centrality measures from an adjacency matrix using the pipeline's
-/// current undirected centrality contract.
+/// Compute centrality measures from an adjacency matrix.
 ///
-/// This intentionally treats the graph as undirected for backward
-/// compatibility: only the upper triangle is scanned, so directed asymmetry is
-/// not reflected in the centrality report even though other AS/LV stages may
-/// preserve directed edges.
-///
-/// Edge weight threshold: an edge exists if `adj[i,j] > 0`.
-/// Dijkstra uses `1 / weight` as edge cost so stronger ties are "shorter".
+/// `CentralityMode::UndirectedLegacy` preserves the original compatibility
+/// contract by scanning only the upper triangle of the adjacency matrix.
+/// `CentralityMode::Directed` treats every positive `adj[i,j]` as a directed
+/// edge from `i` to `j`.
 pub fn compute_centrality(
     adj: &Array2<f64>,
     labels: &[String],
+    mode: CentralityMode,
 ) -> Result<CentralityReport, AsError> {
     let n = adj.nrows();
     if n != adj.ncols() {
@@ -46,50 +43,25 @@ pub fn compute_centrality(
         )));
     }
 
-    // Build petgraph UnGraph<usize, f64> (node=index, edge=weight).
-    let mut graph: UnGraph<usize, f64> = UnGraph::new_undirected();
-    let nodes: Vec<NodeIndex> = (0..n).map(|i| graph.add_node(i)).collect();
-
-    for i in 0..n {
-        for j in (i + 1)..n {
-            let w = adj[[i, j]];
-            if w > 0.0 {
-                graph.add_edge(nodes[i], nodes[j], w);
-            }
+    let weighted_adj = match mode {
+        CentralityMode::UndirectedLegacy => {
+            weighted_adjacency_undirected(&build_undirected_graph(adj))
         }
-    }
-
-    // --- Degree centrality (normalised by n-1) ---
-    let degree: Vec<f64> = (0..n)
-        .map(|i| {
-            let k = graph.edges(nodes[i]).count() as f64;
+        CentralityMode::Directed => weighted_adjacency_directed(adj),
+    };
+    let degree: Vec<f64> = weighted_adj
+        .iter()
+        .map(|neighbors| {
             if n > 1 {
-                k / (n - 1) as f64
+                neighbors.len() as f64 / (n - 1) as f64
             } else {
                 0.0
             }
         })
         .collect();
 
-    // --- Shortest-path distances via Dijkstra (cost = 1/weight) ---
-    // dist_matrix[i][j] = shortest path length; f64::INFINITY if unreachable.
-    let dist_matrix: Vec<Vec<f64>> = (0..n)
-        .map(|i| {
-            let costs = dijkstra(&graph, nodes[i], None, |e| {
-                let w = *e.weight();
-                if w > 0.0 {
-                    1.0 / w
-                } else {
-                    f64::INFINITY
-                }
-            });
-            (0..n)
-                .map(|j| costs.get(&nodes[j]).copied().unwrap_or(f64::INFINITY))
-                .collect()
-        })
-        .collect();
+    let dist_matrix = shortest_path_matrix(&weighted_adj, n);
 
-    // --- Distance centrality (mean shortest path to reachable nodes) ---
     let distance: Vec<f64> = (0..n)
         .map(|i| {
             let reachable: Vec<f64> = dist_matrix[i]
@@ -106,15 +78,13 @@ pub fn compute_centrality(
         })
         .collect();
 
-    // --- Closeness centrality (1 / distance, 0 if isolated) ---
     let closeness: Vec<f64> = distance
         .iter()
         .map(|&d| if d > 1e-15 { 1.0 / d } else { 0.0 })
         .collect();
 
-    // --- Betweenness centrality (parallel weighted Brandes, undirected) ---
-    let weighted_adj = weighted_adjacency(&graph, &nodes);
-    let betweenness = parallel_brandes_betweenness(&weighted_adj, n);
+    let betweenness =
+        parallel_brandes_betweenness(&weighted_adj, n, matches!(mode, CentralityMode::Directed));
 
     Ok(CentralityReport {
         labels: labels.to_vec(),
@@ -149,7 +119,25 @@ impl PartialOrd for State {
     }
 }
 
-fn weighted_adjacency(graph: &UnGraph<usize, f64>, nodes: &[NodeIndex]) -> Vec<Vec<(usize, f64)>> {
+fn build_undirected_graph(adj: &Array2<f64>) -> UnGraph<usize, f64> {
+    let n = adj.nrows();
+    let mut graph: UnGraph<usize, f64> = UnGraph::new_undirected();
+    let nodes: Vec<NodeIndex> = (0..n).map(|i| graph.add_node(i)).collect();
+
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let w = adj[[i, j]];
+            if w > 0.0 {
+                graph.add_edge(nodes[i], nodes[j], w);
+            }
+        }
+    }
+
+    graph
+}
+
+fn weighted_adjacency_undirected(graph: &UnGraph<usize, f64>) -> Vec<Vec<(usize, f64)>> {
+    let nodes: Vec<NodeIndex> = graph.node_indices().collect();
     nodes
         .iter()
         .map(|&node| {
@@ -161,16 +149,72 @@ fn weighted_adjacency(graph: &UnGraph<usize, f64>, nodes: &[NodeIndex]) -> Vec<V
         .collect()
 }
 
+fn weighted_adjacency_directed(adj: &Array2<f64>) -> Vec<Vec<(usize, f64)>> {
+    let n = adj.nrows();
+    (0..n)
+        .map(|i| {
+            (0..n)
+                .filter_map(|j| {
+                    let w = adj[[i, j]];
+                    if i != j && w > 0.0 {
+                        Some((j, w))
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        })
+        .collect()
+}
+
+fn shortest_path_matrix(weighted_adj: &[Vec<(usize, f64)>], n: usize) -> Vec<Vec<f64>> {
+    (0..n)
+        .map(|i| shortest_paths_from(weighted_adj, i))
+        .collect()
+}
+
+fn shortest_paths_from(weighted_adj: &[Vec<(usize, f64)>], s: usize) -> Vec<f64> {
+    const EPS: f64 = 1e-12;
+    let n = weighted_adj.len();
+    let mut dist = vec![f64::INFINITY; n];
+    let mut heap = BinaryHeap::new();
+
+    dist[s] = 0.0;
+    heap.push(State { cost: 0.0, node: s });
+
+    while let Some(State { cost, node: v }) = heap.pop() {
+        if cost > dist[v] + EPS {
+            continue;
+        }
+        for &(w, weight) in &weighted_adj[v] {
+            if weight <= 0.0 {
+                continue;
+            }
+            let next = dist[v] + (1.0 / weight);
+            if next + EPS < dist[w] {
+                dist[w] = next;
+                heap.push(State {
+                    cost: next,
+                    node: w,
+                });
+            }
+        }
+    }
+
+    dist
+}
+
 /// Parallel Brandes betweenness centrality for a weighted graph.
-/// Normalises by (n-1)(n-2)/2 for undirected graphs.
-fn parallel_brandes_betweenness(weighted_adj: &[Vec<(usize, f64)>], n: usize) -> Vec<f64> {
-    // Each source node contributes a partial delta vector.
+fn parallel_brandes_betweenness(
+    weighted_adj: &[Vec<(usize, f64)>],
+    n: usize,
+    directed: bool,
+) -> Vec<f64> {
     let partials: Vec<Vec<f64>> = (0..n)
         .into_par_iter()
         .map(|s| brandes_source(weighted_adj, n, s))
         .collect();
 
-    // Sum partials.
     let mut between = vec![0.0f64; n];
     for partial in &partials {
         for i in 0..n {
@@ -178,22 +222,23 @@ fn parallel_brandes_betweenness(weighted_adj: &[Vec<(usize, f64)>], n: usize) ->
         }
     }
 
-    // For undirected graphs, divide by 2 (each path counted twice) and
-    // normalise by (n-1)(n-2)/2.
     let norm = if n > 2 {
-        ((n - 1) * (n - 2)) as f64 / 2.0
+        ((n - 1) * (n - 2)) as f64
     } else {
         1.0
     };
-
-    between.iter().map(|&b| b / 2.0 / norm).collect()
+    if directed {
+        between.iter().map(|&b| b / norm).collect()
+    } else {
+        between.iter().map(|&b| b / norm).collect()
+    }
 }
 
 /// Brandes algorithm for a single source `s` using weighted shortest paths.
 /// Returns a partial delta vector for all nodes.
 fn brandes_source(weighted_adj: &[Vec<(usize, f64)>], n: usize, s: usize) -> Vec<f64> {
     const EPS: f64 = 1e-12;
-    let mut sigma = vec![0.0f64; n]; // num shortest paths from s
+    let mut sigma = vec![0.0f64; n];
     let mut dist = vec![f64::INFINITY; n];
     let mut pred: Vec<Vec<usize>> = vec![vec![]; n];
     let mut stack: Vec<usize> = Vec::new();
@@ -247,9 +292,6 @@ fn brandes_source(weighted_adj: &[Vec<(usize, f64)>], n: usize, s: usize) -> Vec
     partial
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -261,7 +303,6 @@ mod tests {
 
     #[test]
     fn test_degree_complete_graph() {
-        // All nodes in a complete graph have equal normalised degree = 1.0.
         let n = 4;
         let mut adj = Array2::<f64>::zeros((n, n));
         for i in 0..n {
@@ -271,7 +312,8 @@ mod tests {
                 }
             }
         }
-        let report = compute_centrality(&adj, &labels(n)).expect("centrality should compute");
+        let report = compute_centrality(&adj, &labels(n), CentralityMode::UndirectedLegacy)
+            .expect("centrality should compute");
         for &d in &report.degree {
             assert!((d - 1.0).abs() < 1e-10, "degree={}", d);
         }
@@ -279,14 +321,14 @@ mod tests {
 
     #[test]
     fn test_betweenness_path_graph() {
-        // In a path graph 0-1-2-3-4, node 2 (middle) has highest betweenness.
         let n = 5;
         let mut adj = Array2::<f64>::zeros((n, n));
         for i in 0..(n - 1) {
             adj[[i, i + 1]] = 1.0;
             adj[[i + 1, i]] = 1.0;
         }
-        let report = compute_centrality(&adj, &labels(n)).expect("centrality should compute");
+        let report = compute_centrality(&adj, &labels(n), CentralityMode::UndirectedLegacy)
+            .expect("centrality should compute");
         let max_idx = report
             .betweenness
             .iter()
@@ -299,13 +341,13 @@ mod tests {
 
     #[test]
     fn test_closeness_positive() {
-        // All connected nodes should have positive closeness.
         let n = 3;
         let mut adj = Array2::<f64>::ones((n, n));
         for i in 0..n {
             adj[[i, i]] = 0.0;
         }
-        let report = compute_centrality(&adj, &labels(n)).expect("centrality should compute");
+        let report = compute_centrality(&adj, &labels(n), CentralityMode::UndirectedLegacy)
+            .expect("centrality should compute");
         for &c in &report.closeness {
             assert!(c > 0.0, "closeness={}", c);
         }
@@ -322,16 +364,34 @@ mod tests {
         adj[[0, 2]] = 0.4;
         adj[[2, 0]] = 0.4;
 
-        let report = compute_centrality(&adj, &labels(n)).expect("centrality should compute");
+        let report = compute_centrality(&adj, &labels(n), CentralityMode::UndirectedLegacy)
+            .expect("centrality should compute");
 
         assert!(report.betweenness[1] > report.betweenness[0]);
         assert!(report.betweenness[1] > report.betweenness[2]);
     }
 
     #[test]
+    fn test_directed_centrality_respects_edge_direction() {
+        let mut adj = Array2::<f64>::zeros((3, 3));
+        adj[[0, 1]] = 1.0;
+        adj[[1, 2]] = 1.0;
+
+        let directed = compute_centrality(&adj, &labels(3), CentralityMode::Directed)
+            .expect("directed centrality should compute");
+        let undirected = compute_centrality(&adj, &labels(3), CentralityMode::UndirectedLegacy)
+            .expect("undirected centrality should compute");
+
+        assert_eq!(directed.degree, vec![0.5, 0.5, 0.0]);
+        assert_ne!(directed.degree, undirected.degree);
+        assert!(directed.distance[2] == 0.0);
+    }
+
+    #[test]
     fn test_centrality_rejects_dimension_mismatch() {
         let adj = Array2::<f64>::zeros((2, 3));
-        let err = compute_centrality(&adj, &labels(2)).expect_err("non-square adjacency must fail");
+        let err = compute_centrality(&adj, &labels(2), CentralityMode::UndirectedLegacy)
+            .expect_err("non-square adjacency must fail");
         assert!(err.to_string().contains("square"));
     }
 }

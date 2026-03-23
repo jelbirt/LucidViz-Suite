@@ -1,7 +1,7 @@
 //! Core types for the MatrixForge pipeline.
 
 use anyhow::{bail, Result};
-use as_pipeline::types::CentralityReport;
+use lv_data::CentralityReport;
 pub use lv_data::SimToDistMethod;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
