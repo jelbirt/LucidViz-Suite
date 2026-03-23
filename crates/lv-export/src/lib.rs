@@ -7,8 +7,8 @@ pub mod sequence;
 pub mod snapshot;
 
 #[cfg(feature = "video-export")]
-pub use ffmpeg_pipe::{export_video, VideoConfig};
-pub use sequence::{capture_sequence, ImageFormat, SequenceConfig};
+pub use ffmpeg_pipe::{export_video, export_video_with_control, VideoConfig};
+pub use sequence::{capture_sequence, capture_sequence_with_control, ImageFormat, SequenceConfig};
 pub use snapshot::capture_frame;
 
 #[cfg(test)]

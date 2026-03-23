@@ -7,6 +7,7 @@
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 
 use anyhow::{bail, Context as _, Result};
@@ -56,6 +57,37 @@ pub fn export_video(
     end_frame: u32,
     vid_config: &VideoConfig,
     progress: &mpsc::Sender<f32>,
+) -> Result<()> {
+    export_video_with_control(
+        ctx,
+        dataset,
+        lis_config,
+        buffer,
+        camera,
+        width,
+        height,
+        start_frame,
+        end_frame,
+        vid_config,
+        progress,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn export_video_with_control(
+    ctx: &WgpuContext,
+    dataset: &EtvDataset,
+    lis_config: &LisConfig,
+    buffer: &LisBuffer,
+    camera: &ArcballCamera,
+    width: u32,
+    height: u32,
+    start_frame: u32,
+    end_frame: u32,
+    vid_config: &VideoConfig,
+    progress: &mpsc::Sender<f32>,
+    cancel: Option<&AtomicBool>,
 ) -> Result<()> {
     // Verify ffmpeg is available
     Command::new("ffmpeg")
@@ -114,6 +146,9 @@ pub fn export_video(
     let total = (end + 1).saturating_sub(start_frame).max(1) as f32;
 
     for frame_idx in start_frame..=end {
+        if cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+            bail!("export_video cancelled");
+        }
         let frame = export_frame(dataset, lis_config, buffer, frame_idx)?;
 
         let img = capture_frame(ctx, &frame, camera, width, height)

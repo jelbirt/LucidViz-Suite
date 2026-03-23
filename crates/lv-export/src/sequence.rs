@@ -1,6 +1,7 @@
 //! `sequence` — export a range of LIS frames as individual image files.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 
 use anyhow::{bail, Context as _, Result};
@@ -52,6 +53,21 @@ pub fn capture_sequence(
     config: &SequenceConfig,
     progress: &mpsc::Sender<f32>,
 ) -> Result<()> {
+    capture_sequence_with_control(
+        ctx, dataset, lis_config, buffer, camera, config, progress, None,
+    )
+}
+
+pub fn capture_sequence_with_control(
+    ctx: &WgpuContext,
+    dataset: &EtvDataset,
+    lis_config: &LisConfig,
+    buffer: &LisBuffer,
+    camera: &ArcballCamera,
+    config: &SequenceConfig,
+    progress: &mpsc::Sender<f32>,
+    cancel: Option<&AtomicBool>,
+) -> Result<()> {
     std::fs::create_dir_all(&config.output_dir)
         .with_context(|| format!("create output dir {:?}", config.output_dir))?;
 
@@ -73,6 +89,9 @@ pub fn capture_sequence(
     let ext = config.format.extension();
 
     for frame_idx in start..=end {
+        if cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+            bail!("capture_sequence cancelled");
+        }
         let frame = export_frame(dataset, lis_config, buffer, frame_idx)?;
 
         let img = capture_frame(ctx, &frame, camera, config.width, config.height)
@@ -116,9 +135,11 @@ pub(crate) fn export_frame(
 
 #[cfg(test)]
 mod tests {
-    use super::export_frame;
+    use super::{capture_sequence_with_control, export_frame, ImageFormat, SequenceConfig};
     use lv_data::{EtvDataset, EtvRow, EtvSheet, LisBuffer, LisConfig, ShapeKind};
     use lv_renderer::{build_lis_buffer, compute_frame};
+    use std::sync::atomic::AtomicBool;
+    use std::sync::mpsc;
 
     fn sample_dataset() -> EtvDataset {
         EtvDataset {
@@ -215,5 +236,43 @@ mod tests {
             .expect_err("out-of-range frame must fail");
 
         assert!(err.to_string().contains("out of range"));
+    }
+
+    #[test]
+    fn capture_sequence_honors_cancellation_before_rendering() {
+        let dataset = sample_dataset();
+        let lis_config = LisConfig {
+            lis_value: 4,
+            ..Default::default()
+        };
+        let buffer = build_lis_buffer(&dataset, &lis_config);
+        let progress_tx = mpsc::channel().0;
+        let cancel = AtomicBool::new(true);
+        let ctx = lv_renderer::WgpuContext::new_headless().expect("headless ctx");
+        let camera = lv_renderer::ArcballCamera::new(1.0);
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let config = SequenceConfig {
+            output_dir: tempdir.path().to_path_buf(),
+            filename_prefix: "cancel".into(),
+            start_frame: 0,
+            end_frame: 1,
+            width: 128,
+            height: 128,
+            format: ImageFormat::Png,
+        };
+
+        let err = capture_sequence_with_control(
+            &ctx,
+            &dataset,
+            &lis_config,
+            &buffer,
+            &camera,
+            &config,
+            &progress_tx,
+            Some(&cancel),
+        )
+        .expect_err("cancelled export should abort");
+
+        assert!(err.to_string().contains("cancelled"));
     }
 }

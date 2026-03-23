@@ -12,6 +12,7 @@
 use crate::app_state::EgoClusterState;
 use anyhow::{Context, Result};
 use lv_data::LisConfig;
+use lv_gui::state::ExportImageFormat;
 use lv_gui::EgoEdgeDirection;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -39,6 +40,10 @@ pub struct SessionSnapshot {
     pub ego_mode: bool,
     /// Ego-cluster sub-state.
     pub ego: EgoSnapshot,
+    /// Audio panel/runtime settings.
+    pub audio: AudioSnapshot,
+    /// Export panel settings.
+    pub export: ExportSnapshot,
 }
 
 /// Serialisable mirror of [`LisConfig`] (no opaque fields).
@@ -81,6 +86,62 @@ pub struct EgoSnapshot {
     pub shared_objects_only: bool,
     pub cluster_value_min: f64,
     pub cluster_value_max: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AudioSnapshot {
+    pub selected_port: String,
+    pub live_enabled: bool,
+    pub volume: f32,
+    pub graduated: bool,
+    pub semitone_range: i32,
+    pub beats: u32,
+    pub hold_slices: u32,
+}
+
+impl Default for AudioSnapshot {
+    fn default() -> Self {
+        Self {
+            selected_port: String::new(),
+            live_enabled: false,
+            volume: 1.0,
+            graduated: false,
+            semitone_range: 12,
+            beats: 1,
+            hold_slices: 2,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExportSnapshot {
+    pub output_dir: Option<PathBuf>,
+    pub filename_prefix: String,
+    pub start_frame: u32,
+    pub end_frame: u32,
+    pub width: u32,
+    pub height: u32,
+    pub format: ExportImageFormat,
+    pub fps: u32,
+    pub crf: u32,
+    pub codec: String,
+}
+
+impl Default for ExportSnapshot {
+    fn default() -> Self {
+        Self {
+            output_dir: None,
+            filename_prefix: "frame".into(),
+            start_frame: 0,
+            end_frame: 0,
+            width: 1920,
+            height: 1080,
+            format: ExportImageFormat::Png,
+            fps: 30,
+            crf: 23,
+            codec: "libx264".into(),
+        }
+    }
 }
 
 impl From<&EgoClusterState> for EgoSnapshot {
@@ -172,7 +233,7 @@ fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
     std::fs::write(&tmp_path, bytes)?;
     if let Err(err) = std::fs::rename(&tmp_path, path) {
         if path.exists() {
-            let _ = std::fs::remove_file(path);
+            std::fs::remove_file(path)?;
             std::fs::rename(&tmp_path, path)?;
         } else {
             return Err(err.into());
@@ -237,6 +298,27 @@ mod tests {
                 cluster_value_min: 0.0,
                 cluster_value_max: 5.0,
             },
+            audio: AudioSnapshot {
+                selected_port: "Port A".into(),
+                live_enabled: true,
+                volume: 0.8,
+                graduated: true,
+                semitone_range: 7,
+                beats: 3,
+                hold_slices: 4,
+            },
+            export: ExportSnapshot {
+                output_dir: Some(PathBuf::from("/tmp/exports")),
+                filename_prefix: "demo".into(),
+                start_frame: 2,
+                end_frame: 8,
+                width: 1280,
+                height: 720,
+                format: ExportImageFormat::Tga,
+                fps: 24,
+                crf: 20,
+                codec: "libx265".into(),
+            },
         };
 
         let json = serde_json::to_string(&snap).unwrap();
@@ -245,6 +327,8 @@ mod tests {
         assert_eq!(snap2.slice_index, 7);
         assert_eq!(snap2.ego.selected, Some("node_0".to_string()));
         assert_eq!(snap2.ego.direction, EgoEdgeDirection::Both);
+        assert_eq!(snap2.audio.selected_port, "Port A");
+        assert_eq!(snap2.export.filename_prefix, "demo");
     }
 
     #[test]
@@ -286,6 +370,8 @@ mod tests {
                 cluster_value_min: 0.0,
                 cluster_value_max: 100.0,
             },
+            audio: AudioSnapshot::default(),
+            export: ExportSnapshot::default(),
         };
 
         let path = dir.path().join("demo.json");

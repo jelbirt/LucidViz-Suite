@@ -83,18 +83,24 @@ impl LisControlPanel {
             }
             if ui.button("⏹").clicked() {
                 state.play_state = PlayState::Stopped;
-                state.slice_index = 0;
+                state.pending_slice_index = Some(0);
             }
             ui.checkbox(&mut state.lis_config.looping, "Loop");
         });
 
         // ── Scrubber ───────────────────────────────────────────────────────
-        if let Some(buf) = &state.lis_buffer {
+        if let Some(buf) = state.lis_buffer() {
             let total = buf.total_frames.max(1);
+            let mut requested_slice = state.pending_slice_index.unwrap_or(state.slice_index());
             ui.horizontal(|ui| {
-                ui.label(format!("Frame {}/{total}", state.slice_index + 1));
+                ui.label(format!("Frame {}/{total}", requested_slice + 1));
             });
-            ui.add(egui::Slider::new(&mut state.slice_index, 0..=(total - 1)));
+            if ui
+                .add(egui::Slider::new(&mut requested_slice, 0..=(total - 1)))
+                .changed()
+            {
+                state.pending_slice_index = Some(requested_slice);
+            }
         }
 
         ev

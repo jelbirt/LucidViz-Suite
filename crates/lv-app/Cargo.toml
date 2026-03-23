@@ -16,9 +16,10 @@ path = "src/main.rs"
 # "audio" includes the lv-audio crate but NOT midir (no ALSA dependency).
 # Add "midi" to also enable real MIDI I/O (requires libasound2-dev on Linux).
 default    = ["audio", "export", "native-io"]
-audio      = ["dep:lv-audio"]
+audio      = ["dep:lv-audio", "lv-gui/audio"]
 midi       = ["audio", "lv-audio/midi"]
-export     = ["dep:lv-export"]
+export     = ["dep:lv-export", "lv-gui/export"]
+video-export = ["export", "lv-export/video-export", "lv-gui/video-export"]
 native-io  = []
 wasm       = []
 

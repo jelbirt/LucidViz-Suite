@@ -4,7 +4,7 @@ use crate::as_panel::AsPanel;
 use crate::mf_panel::MfPanel;
 use crate::panels::{
     AudioPanel, ClusterFilterPanel, ExportPanel, FileLoaderEvent, FileLoaderPanel, LisControlPanel,
-    LisEvent, ShapeOverridePanel,
+    LisEvent, SessionPanel, ShapeOverridePanel,
 };
 use crate::state::AppState;
 
@@ -32,6 +32,7 @@ pub struct LvPanels {
     pub cluster_filter: ClusterFilterPanel,
     pub audio_panel: AudioPanel,
     pub export_panel: ExportPanel,
+    pub session_panel: SessionPanel,
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -143,6 +144,13 @@ impl LucidWorkspace {
                 self.lv_panels.audio_panel.show(ui, state);
             });
 
+        ui.separator();
+        egui::CollapsingHeader::new("Sessions")
+            .default_open(false)
+            .show(ui, |ui| {
+                self.lv_panels.session_panel.show(ui, state);
+            });
+
         // Surface any error message from state
         if let Some(ref err) = state.load_error.clone() {
             ui.separator();
@@ -156,14 +164,7 @@ impl LucidWorkspace {
 fn apply_file_loader_event(state: &mut AppState, evt: FileLoaderEvent) -> bool {
     match evt {
         FileLoaderEvent::Loaded { dataset, path } => {
-            state.dataset = Some(dataset);
-            state.source_path = Some(path);
-            state.as_input_source = crate::state::AsInputSource::Dataset;
-            state.mf_output = None;
-            state.mf_series_output = None;
-            state.slice_index = 0;
-            state.dataset_changed = true;
-            state.load_error = None;
+            state.queue_dataset_load(dataset, path);
             true
         }
         FileLoaderEvent::Error(err) => {
@@ -187,7 +188,7 @@ mod tests {
     fn apply_file_loader_event_sets_dataset_and_resets_related_state() {
         let mut state = AppState::new();
         state.as_input_source = AsInputSource::MatrixForge;
-        state.slice_index = 12;
+        state.pending_slice_index = Some(12);
         state.load_error = Some("old error".into());
         state.mf_output = Some(MfOutput {
             labels: vec!["a".into()],
@@ -197,7 +198,7 @@ mod tests {
             raw_counts: vec![0],
             ppmi_matrix: vec![0.0],
             n: 1,
-            centrality: as_pipeline::types::CentralityReport {
+            centrality: lv_data::CentralityReport {
                 labels: vec!["a".into()],
                 degree: vec![0.0],
                 distance: vec![0.0],
@@ -227,11 +228,16 @@ mod tests {
         );
 
         assert!(needs_rebuild);
-        assert!(state.dataset.is_some());
-        assert_eq!(state.source_path, Some(path));
+        assert!(state.pending_dataset_load.is_some());
+        assert_eq!(
+            state
+                .pending_dataset_load
+                .as_ref()
+                .map(|p| p.source_path.clone()),
+            Some(path)
+        );
         assert_eq!(state.as_input_source, AsInputSource::Dataset);
-        assert_eq!(state.slice_index, 0);
-        assert!(state.dataset_changed);
+        assert_eq!(state.pending_slice_index, Some(0));
         assert!(state.load_error.is_none());
         assert!(state.mf_output.is_none());
         assert!(state.mf_series_output.is_none());
@@ -245,6 +251,6 @@ mod tests {
 
         assert!(!needs_rebuild);
         assert_eq!(state.load_error.as_deref(), Some("boom"));
-        assert!(state.dataset.is_none());
+        assert!(state.dataset().is_none());
     }
 }

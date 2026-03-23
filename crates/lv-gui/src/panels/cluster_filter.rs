@@ -12,7 +12,7 @@ impl ClusterFilterPanel {
         ui.separator();
 
         // Determine the actual data range
-        let (data_min, data_max) = if let Some(ds) = &state.dataset {
+        let (data_min, data_max) = if let Some(ds) = state.dataset() {
             let vals: Vec<f64> = ds
                 .sheets
                 .iter()
@@ -81,7 +81,7 @@ impl ClusterFilterPanel {
         ui.checkbox(&mut state.shared_only, "Shared objects only");
 
         // Object list (filtered)
-        if let Some(ds) = &state.dataset {
+        if let Some(ds) = state.dataset() {
             let visible: Vec<&str> = ds
                 .sheets
                 .iter()

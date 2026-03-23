@@ -25,3 +25,5 @@ bytemuck.workspace   = true
 nalgebra.workspace   = true
 wgpu.workspace       = true
 
+[dev-dependencies]
+tempfile.workspace = true

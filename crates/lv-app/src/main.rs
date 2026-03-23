@@ -8,6 +8,8 @@ mod notifications;
 mod prefs;
 mod session;
 
+use std::array;
+use std::path::Path;
 use std::sync::Arc;
 
 use app_state::{build_gpu_edges, compute_ego_edges, compute_visible_objects, EgoClusterState};
@@ -22,6 +24,17 @@ use lv_renderer::{
 };
 use notifications::NotificationQueue;
 use prefs::UserPreferences;
+use session::{
+    list_sessions, load_session, save_session, AudioSnapshot, EgoSnapshot, ExportSnapshot,
+    LisConfigSnapshot, SessionSnapshot,
+};
+
+#[cfg(feature = "audio")]
+use lv_audio::{BeatsScheduler, GraduatedConfig};
+#[cfg(feature = "export")]
+use lv_export::{capture_frame, capture_sequence_with_control, ImageFormat, SequenceConfig};
+#[cfg(all(feature = "export", feature = "video-export"))]
+use lv_export::{export_video_with_control, VideoConfig};
 
 use wgpu::util::DeviceExt;
 use winit::{
@@ -388,6 +401,10 @@ struct Renderer {
     // Phase 9: preferences + notifications
     prefs: UserPreferences,
     notifications: NotificationQueue,
+    #[cfg(feature = "audio")]
+    audio_scheduler: BeatsScheduler,
+    #[cfg(feature = "audio")]
+    last_audio_frame_index: Option<u32>,
 }
 
 impl Renderer {
@@ -398,9 +415,9 @@ impl Renderer {
         let lis_config = lis_config_from_prefs(&prefs);
         let lis_buffer = build_lis_buffer(&dataset, &lis_config);
         let mut app_state = AppState::new();
-        app_state.dataset = Some(dataset.clone());
         app_state.lis_config = lis_config.clone();
-        app_state.lis_buffer = Some(lis_buffer.clone());
+        app_state.sync_runtime_snapshot(&dataset, dataset.source_path.clone(), &lis_buffer, 0);
+        app_state.saved_sessions = list_sessions();
 
         let size = window.inner_size();
         let aspect = size.width as f32 / size.height.max(1) as f32;
@@ -644,7 +661,383 @@ impl Renderer {
             last_click_pos: None,
             prefs,
             notifications: NotificationQueue::default(),
+            #[cfg(feature = "audio")]
+            audio_scheduler: BeatsScheduler::new(lv_audio::MidiEngine::new()),
+            #[cfg(feature = "audio")]
+            last_audio_frame_index: None,
         })
+    }
+
+    fn handle_audio_request(&mut self) {
+        #[cfg(feature = "audio")]
+        if let Some(request) = self.app_state.pending_audio_request.take() {
+            match request {
+                lv_gui::state::AudioRequest::RefreshPorts => {
+                    self.app_state.audio_ports = BeatsScheduler::list_ports();
+                    self.app_state.audio_status = Some(format!(
+                        "Found {} MIDI output port(s).",
+                        self.app_state.audio_ports.len()
+                    ));
+                    if self.app_state.audio_selected_port.is_empty() {
+                        if let Some(first) = self.app_state.audio_ports.first() {
+                            self.app_state.audio_selected_port = first.clone();
+                        }
+                    }
+                }
+                lv_gui::state::AudioRequest::Connect(port) => {
+                    match self.audio_scheduler.connect(&port) {
+                        Ok(()) => {
+                            self.app_state.audio_connected = true;
+                            self.app_state.audio_selected_port = port.clone();
+                            self.app_state.audio_status = Some(format!("Connected to '{port}'."));
+                            self.prefs.audio_port = Some(port);
+                        }
+                        Err(err) => {
+                            self.app_state.audio_connected = false;
+                            self.app_state.audio_status =
+                                Some(format!("Audio connect failed: {err}"));
+                        }
+                    }
+                }
+                lv_gui::state::AudioRequest::Disconnect => {
+                    self.audio_scheduler.disconnect();
+                    self.app_state.audio_connected = false;
+                    self.last_audio_frame_index = None;
+                    self.app_state.audio_status = Some("Disconnected MIDI output.".into());
+                }
+                lv_gui::state::AudioRequest::TestTone => {
+                    let result = self.audio_scheduler.test_tone();
+                    self.app_state.audio_status = Some(match result {
+                        Ok(()) => "Played test tone.".into(),
+                        Err(err) => format!("Test tone failed: {err}"),
+                    });
+                }
+            }
+        }
+    }
+
+    #[cfg(feature = "audio")]
+    fn sync_live_audio(&mut self, frame: &lv_data::LisFrame) {
+        self.audio_scheduler.beats = self.app_state.audio_beats.max(1);
+        self.audio_scheduler.lis_value = self.lis_config.lis_value.max(2);
+        self.audio_scheduler.hold_slices = self.app_state.audio_hold_slices.max(1);
+        self.audio_scheduler.velocity =
+            ((self.app_state.audio_volume.clamp(0.0, 2.0) / 2.0) * 127.0).round() as u8;
+
+        let audio_active = self.app_state.audio_connected
+            && self.app_state.audio_live_enabled
+            && matches!(self.app_state.play_state, PlayState::Playing);
+
+        if !audio_active {
+            if self.last_audio_frame_index.take().is_some() {
+                self.audio_scheduler.stop();
+            }
+            return;
+        }
+
+        if self.last_audio_frame_index == Some(frame.slice_index) {
+            return;
+        }
+
+        if self
+            .last_audio_frame_index
+            .is_some_and(|last| frame.slice_index < last)
+        {
+            self.audio_scheduler.stop();
+        }
+
+        if let Some(idx) = self.active_sheet_index(frame.transition_index) {
+            let grad_cfg = GraduatedConfig {
+                semitone_range: self.app_state.audio_semitone_range,
+                ..GraduatedConfig::default()
+            };
+            self.audio_scheduler.on_frame_advance(
+                frame,
+                &self.dataset.sheets[idx].rows,
+                self.app_state.audio_graduated,
+                &grad_cfg,
+            );
+            self.last_audio_frame_index = Some(frame.slice_index);
+        }
+    }
+
+    fn handle_session_request(&mut self) {
+        if let Some(request) = self.app_state.pending_session_request.take() {
+            let result = match request {
+                lv_gui::state::SessionRequest::RefreshList => {
+                    self.app_state.saved_sessions = list_sessions();
+                    Ok("Session list refreshed.".to_string())
+                }
+                lv_gui::state::SessionRequest::Save(name) => {
+                    let snapshot = SessionSnapshot {
+                        name: name.clone(),
+                        source_path: self.app_state.source_path().cloned(),
+                        lis_config: LisConfigSnapshot::from(&self.lis_config),
+                        slice_index: self.slice_index,
+                        cluster_min: self.app_state.cluster_min,
+                        cluster_max: self.app_state.cluster_max,
+                        ego_mode: self.app_state.ego_mode,
+                        ego: EgoSnapshot::from(&self.ego_state),
+                        audio: AudioSnapshot {
+                            selected_port: self.app_state.audio_selected_port.clone(),
+                            live_enabled: self.app_state.audio_live_enabled,
+                            volume: self.app_state.audio_volume,
+                            graduated: self.app_state.audio_graduated,
+                            semitone_range: self.app_state.audio_semitone_range,
+                            beats: self.app_state.audio_beats,
+                            hold_slices: self.app_state.audio_hold_slices,
+                        },
+                        export: ExportSnapshot {
+                            output_dir: self.app_state.export_output_dir.clone(),
+                            filename_prefix: self.app_state.export_filename_prefix.clone(),
+                            start_frame: self.app_state.export_start_frame,
+                            end_frame: self.app_state.export_end_frame,
+                            width: self.app_state.export_width,
+                            height: self.app_state.export_height,
+                            format: self.app_state.export_format,
+                            fps: self.app_state.export_fps,
+                            crf: self.app_state.export_crf,
+                            codec: self.app_state.export_codec.clone(),
+                        },
+                    };
+                    save_session(&snapshot).map(|_| {
+                        self.app_state.saved_sessions = list_sessions();
+                        self.app_state.session_name = name.clone();
+                        format!("Saved session '{name}'.")
+                    })
+                }
+                lv_gui::state::SessionRequest::Load(name) => {
+                    load_session(&name).and_then(|snapshot| {
+                        if let Some(path) = snapshot.source_path.clone() {
+                            let dataset = load_dataset_from_path(&path)?;
+                            self.dataset = dataset;
+                            self.dataset.source_path = Some(path.clone());
+                        }
+                        self.lis_config = snapshot.lis_config.into();
+                        self.app_state.lis_config = self.lis_config.clone();
+                        self.slice_index = snapshot.slice_index;
+                        self.app_state.pending_slice_index = Some(snapshot.slice_index);
+                        self.app_state.cluster_min = snapshot.cluster_min;
+                        self.app_state.cluster_max = snapshot.cluster_max;
+                        self.app_state.ego_mode = snapshot.ego_mode;
+                        self.ego_state = snapshot.ego.into();
+                        self.app_state.ego_direction = self.ego_state.direction;
+                        self.app_state.secondary_edges = self.ego_state.show_secondary;
+                        self.app_state.shared_only = self.ego_state.shared_objects_only;
+                        self.app_state.audio_selected_port = snapshot.audio.selected_port.clone();
+                        self.app_state.audio_live_enabled = snapshot.audio.live_enabled;
+                        self.app_state.audio_volume = snapshot.audio.volume;
+                        self.app_state.audio_graduated = snapshot.audio.graduated;
+                        self.app_state.audio_semitone_range = snapshot.audio.semitone_range;
+                        self.app_state.audio_beats = snapshot.audio.beats;
+                        self.app_state.audio_hold_slices = snapshot.audio.hold_slices;
+                        self.app_state.export_output_dir = snapshot.export.output_dir.clone();
+                        self.app_state.export_filename_prefix = snapshot.export.filename_prefix;
+                        self.app_state.export_start_frame = snapshot.export.start_frame;
+                        self.app_state.export_end_frame = snapshot.export.end_frame;
+                        self.app_state.export_width = snapshot.export.width;
+                        self.app_state.export_height = snapshot.export.height;
+                        self.app_state.export_format = snapshot.export.format;
+                        self.app_state.export_fps = snapshot.export.fps;
+                        self.app_state.export_crf = snapshot.export.crf;
+                        self.app_state.export_codec = snapshot.export.codec;
+                        #[cfg(feature = "audio")]
+                        if self.app_state.audio_selected_port.is_empty() {
+                            self.audio_scheduler.disconnect();
+                            self.app_state.audio_connected = false;
+                            self.last_audio_frame_index = None;
+                        } else {
+                            match self
+                                .audio_scheduler
+                                .connect(&self.app_state.audio_selected_port)
+                            {
+                                Ok(()) => {
+                                    self.app_state.audio_connected = true;
+                                }
+                                Err(err) => {
+                                    self.app_state.audio_connected = false;
+                                    self.app_state.audio_status =
+                                        Some(format!("Session audio reconnect failed: {err}"));
+                                }
+                            }
+                        }
+                        self.rebuild_lis();
+                        self.app_state.session_name = name.clone();
+                        Ok(format!("Loaded session '{name}'."))
+                    })
+                }
+            };
+            self.app_state.session_status = Some(match result {
+                Ok(msg) => msg,
+                Err(err) => format!("Session error: {err:#}"),
+            });
+        }
+    }
+
+    #[cfg(feature = "export")]
+    fn handle_export_request(&mut self, frame: &lv_data::LisFrame) {
+        if let Some(request) = self.app_state.pending_export_request.take() {
+            if self.app_state.export_job.is_some() {
+                self.app_state.export_status = Some("An export is already running.".into());
+                return;
+            }
+            match request.kind {
+                lv_gui::state::ExportKind::CurrentFrame => {
+                    let prefix = if request.filename_prefix.trim().is_empty() {
+                        "frame"
+                    } else {
+                        request.filename_prefix.trim()
+                    };
+                    let extension = match request.format {
+                        lv_gui::state::ExportImageFormat::Png => "png",
+                        lv_gui::state::ExportImageFormat::Tga => "tga",
+                    };
+                    let path = request
+                        .output_dir
+                        .join(format!("{prefix}_{:06}.{extension}", self.slice_index));
+                    let result = std::fs::create_dir_all(&request.output_dir)
+                        .map_err(anyhow::Error::from)
+                        .and_then(|_| {
+                            capture_frame(
+                                &self.ctx,
+                                frame,
+                                &self.camera,
+                                request.width,
+                                request.height,
+                            )
+                        })
+                        .and_then(|img| img.save(&path).map_err(anyhow::Error::from));
+                    match result {
+                        Ok(()) => {
+                            self.app_state.export_status =
+                                Some(format!("Saved current frame to {}.", path.display()));
+                            self.notifications
+                                .push(notifications::Notification::info(format!(
+                                    "Exported {}",
+                                    path.display()
+                                )));
+                        }
+                        Err(err) => {
+                            self.app_state.export_status = Some(format!("Export failed: {err:#}"));
+                        }
+                    }
+                }
+                lv_gui::state::ExportKind::Sequence => {
+                    self.start_export_job(request, false);
+                }
+                lv_gui::state::ExportKind::Video => {
+                    self.start_export_job(request, true);
+                }
+            }
+        }
+    }
+
+    #[cfg(feature = "export")]
+    fn start_export_job(&mut self, request: lv_gui::state::ExportRequest, video: bool) {
+        use std::sync::atomic::AtomicBool;
+        use std::sync::mpsc;
+        use std::thread;
+
+        let dataset = self.dataset.clone();
+        let lis_config = self.lis_config.clone();
+        let lis_buffer = self.lis_buffer.clone();
+        let camera = self.camera.clone();
+        let (progress_tx, progress_rx) = mpsc::channel();
+        let (result_tx, result_rx) = mpsc::channel();
+        let cancel_flag = Arc::new(AtomicBool::new(false));
+        let cancel_for_thread = Arc::clone(&cancel_flag);
+        let kind = request.kind;
+
+        thread::spawn(move || {
+            let result = lv_renderer::WgpuContext::new_headless()
+                .and_then(|ctx| {
+                    let image_format = match request.format {
+                        lv_gui::state::ExportImageFormat::Png => ImageFormat::Png,
+                        lv_gui::state::ExportImageFormat::Tga => ImageFormat::Tga,
+                    };
+                    if video {
+                        #[cfg(feature = "video-export")]
+                        {
+                            let output_name = if request.filename_prefix.trim().is_empty() {
+                                "export.mp4".to_string()
+                            } else {
+                                format!("{}.mp4", request.filename_prefix.trim())
+                            };
+                            let output_path = request.output_dir.join(output_name);
+                            let video_config = VideoConfig {
+                                output_path: output_path.clone(),
+                                fps: request.fps,
+                                crf: request.crf,
+                                codec: request.codec.clone(),
+                            };
+                            export_video_with_control(
+                                &ctx,
+                                &dataset,
+                                &lis_config,
+                                &lis_buffer,
+                                &camera,
+                                request.width,
+                                request.height,
+                                request.start_frame,
+                                request.end_frame,
+                                &video_config,
+                                &progress_tx,
+                                Some(cancel_for_thread.as_ref()),
+                            )
+                            .map(|_| format!("Saved video export to {}.", output_path.display()))
+                        }
+                        #[cfg(not(feature = "video-export"))]
+                        {
+                            Err(anyhow::anyhow!("video export not compiled in"))
+                        }
+                    } else {
+                        let seq_config = SequenceConfig {
+                            output_dir: request.output_dir.clone(),
+                            filename_prefix: if request.filename_prefix.trim().is_empty() {
+                                "frame".into()
+                            } else {
+                                request.filename_prefix.trim().to_string()
+                            },
+                            start_frame: request.start_frame,
+                            end_frame: request.end_frame,
+                            width: request.width,
+                            height: request.height,
+                            format: image_format,
+                        };
+                        capture_sequence_with_control(
+                            &ctx,
+                            &dataset,
+                            &lis_config,
+                            &lis_buffer,
+                            &camera,
+                            &seq_config,
+                            &progress_tx,
+                            Some(cancel_for_thread.as_ref()),
+                        )
+                        .map(|_| {
+                            format!(
+                                "Saved image sequence to {}.",
+                                seq_config.output_dir.display()
+                            )
+                        })
+                    }
+                })
+                .map_err(|err| err.to_string());
+            let _ = result_tx.send(result);
+        });
+
+        self.app_state.export_status = Some(match kind {
+            lv_gui::state::ExportKind::Sequence => "Started image-sequence export.".into(),
+            lv_gui::state::ExportKind::Video => "Started video export.".into(),
+            lv_gui::state::ExportKind::CurrentFrame => unreachable!(),
+        });
+        self.app_state.export_job = Some(lv_gui::state::ExportJob {
+            kind,
+            progress: 0.0,
+            progress_rx,
+            result_rx,
+            cancel_flag,
+        });
     }
 
     fn make_depth_view(device: &wgpu::Device, w: u32, h: u32) -> wgpu::TextureView {
@@ -679,8 +1072,13 @@ impl Renderer {
     fn rebuild_lis(&mut self) {
         self.lis_buffer = build_lis_buffer(&self.dataset, &self.lis_config);
         self.slice_index = 0;
-        self.app_state.lis_buffer = Some(self.lis_buffer.clone());
-        self.app_state.slice_index = 0;
+        let source_path = self
+            .dataset
+            .source_path
+            .clone()
+            .or_else(|| self.app_state.source_path().cloned());
+        self.app_state
+            .sync_runtime_snapshot(&self.dataset, source_path, &self.lis_buffer, 0);
     }
 
     /// Object picking: project world-space positions to screen, find closest to
@@ -748,12 +1146,14 @@ impl Renderer {
 
     fn render(&mut self, window: &Window) {
         self.app_state.poll_jobs();
+        self.app_state.poll_export_job();
+        self.handle_audio_request();
+        self.handle_session_request();
 
-        if self.app_state.dataset_changed {
-            if let Some(ds) = self.app_state.dataset.clone() {
-                self.dataset = ds;
-            }
-            if let Some(path) = self.app_state.source_path.clone() {
+        if let Some(pending) = self.app_state.pending_dataset_load.take() {
+            self.dataset = pending.dataset;
+            self.dataset.source_path = Some(pending.source_path.clone());
+            if let Some(path) = self.dataset.source_path.clone() {
                 self.prefs.push_recent(path);
                 if let Err(err) = self.prefs.save() {
                     log::warn!("Failed to save prefs after dataset load: {err:#}");
@@ -761,7 +1161,6 @@ impl Renderer {
             }
             self.lis_config = self.app_state.lis_config.clone();
             self.rebuild_lis();
-            self.app_state.dataset_changed = false;
         }
         if self.app_state.rebuild_lis {
             self.lis_config = self.app_state.lis_config.clone();
@@ -772,7 +1171,6 @@ impl Renderer {
         self.lis_config = self.app_state.lis_config.clone();
         self.timer.set_target_fps(self.lis_config.target_fps);
         self.timer.set_speed(self.lis_config.speed);
-        self.app_state.lis_buffer = Some(self.lis_buffer.clone());
 
         // Sync ego state from GUI app_state
         self.ego_state.cluster_value_min = self.app_state.cluster_min;
@@ -790,7 +1188,11 @@ impl Renderer {
             self.lis_buffer.frames.len() as u32
         };
         if total > 0 {
-            self.slice_index = self.app_state.slice_index.min(total - 1);
+            if let Some(requested) = self.app_state.pending_slice_index.take() {
+                self.slice_index = requested.min(total - 1);
+            } else {
+                self.slice_index = self.app_state.slice_index().min(total - 1);
+            }
             let adv = self.timer.tick();
             self.slice_index = advance_slice_index(
                 self.slice_index,
@@ -799,8 +1201,13 @@ impl Renderer {
                 self.lis_config.looping,
                 adv.advance_slices,
             );
-            self.app_state.slice_index = self.slice_index;
         }
+        self.app_state.sync_runtime_snapshot(
+            &self.dataset,
+            self.dataset.source_path.clone(),
+            &self.lis_buffer,
+            self.slice_index,
+        );
 
         // camera uniforms
         let uniforms = ShapeUniforms {
@@ -831,6 +1238,12 @@ impl Renderer {
             let idx = (self.slice_index as usize).min(self.lis_buffer.frames.len() - 1);
             self.lis_buffer.frames[idx].clone()
         };
+
+        #[cfg(feature = "audio")]
+        self.sync_live_audio(&frame);
+
+        #[cfg(feature = "export")]
+        self.handle_export_request(&frame);
 
         // Handle deferred left-click picking
         if let Some(click) = self.last_click_pos.take() {
@@ -879,17 +1292,16 @@ impl Renderer {
             })
             .collect();
 
+        let grouped_instances = group_instances_by_shape(&filtered_instances);
+
         // Upload per-shape instance data
         for &kind in &self.shape_meshes.kinds {
-            let insts: Vec<GpuInstance> = filtered_instances
-                .iter()
-                .filter(|i| i.shape_id == kind as u32)
-                .copied()
-                .collect();
-            if !insts.is_empty() {
-                self.inst_buf
-                    .update(kind, &insts, &self.ctx.device, &self.ctx.queue);
-            }
+            self.inst_buf.update(
+                kind,
+                &grouped_instances[kind as usize],
+                &self.ctx.device,
+                &self.ctx.queue,
+            );
         }
 
         // Build + upload edges
@@ -980,12 +1392,7 @@ impl Renderer {
 
             for (i, &kind) in self.shape_meshes.kinds.iter().enumerate() {
                 let mesh = &self.shape_meshes.meshes[i];
-                let insts: Vec<GpuInstance> = filtered_instances
-                    .iter()
-                    .filter(|inst| inst.shape_id == kind as u32)
-                    .copied()
-                    .collect();
-                let count = self.inst_buf.instance_count(kind, &insts);
+                let count = self.inst_buf.instance_count(kind);
                 self.inst_buf.draw(kind, mesh, &mut rpass, count);
             }
 
@@ -1118,6 +1525,22 @@ fn apply_object_override(
     instance
 }
 
+fn group_instances_by_shape(instances: &[GpuInstance]) -> [Vec<GpuInstance>; ShapeKind::ALL.len()] {
+    let mut grouped: [Vec<GpuInstance>; ShapeKind::ALL.len()] = array::from_fn(|_| Vec::new());
+    for instance in instances {
+        let shape_idx = (instance.shape_id as usize).min(ShapeKind::ALL.len() - 1);
+        grouped[shape_idx].push(*instance);
+    }
+    grouped
+}
+
+fn load_dataset_from_path(path: &Path) -> anyhow::Result<EtvDataset> {
+    match path.extension().and_then(|ext| ext.to_str()) {
+        Some("json") => Ok(lv_data::load_dataset_json(path)?),
+        _ => Ok(lv_data::read_etv_xlsx(path)?),
+    }
+}
+
 fn lis_config_from_prefs(prefs: &UserPreferences) -> LisConfig {
     LisConfig {
         lis_value: prefs.default_lis.max(2),
@@ -1128,7 +1551,9 @@ fn lis_config_from_prefs(prefs: &UserPreferences) -> LisConfig {
 
 #[cfg(test)]
 mod runtime_tests {
-    use super::{advance_slice_index, apply_object_override, lis_config_from_prefs};
+    use super::{
+        advance_slice_index, apply_object_override, group_instances_by_shape, lis_config_from_prefs,
+    };
     use lv_data::{GpuInstance, ShapeKind};
     use lv_gui::state::{ObjectOverride, PlayState};
     use std::path::PathBuf;
@@ -1187,6 +1612,29 @@ mod runtime_tests {
         assert_eq!(config.target_fps, Some(24));
         assert!(config.looping);
         assert_eq!(config.speed, 1.0);
+    }
+
+    #[test]
+    fn group_instances_by_shape_batches_without_re_filtering() {
+        let sphere = GpuInstance {
+            position: [0.0, 0.0, 0.0],
+            size: 1.0,
+            size_alpha: 0.0,
+            _pad0: [0.0; 3],
+            color: [1.0, 0.0, 0.0, 1.0],
+            spin: [0.0, 0.0, 0.0],
+            shape_id: ShapeKind::Sphere.gpu_id(),
+        };
+        let cube = GpuInstance {
+            shape_id: ShapeKind::Cube.gpu_id(),
+            ..sphere
+        };
+
+        let grouped = group_instances_by_shape(&[sphere, cube, sphere]);
+
+        assert_eq!(grouped[ShapeKind::Sphere as usize].len(), 2);
+        assert_eq!(grouped[ShapeKind::Cube as usize].len(), 1);
+        assert!(grouped[ShapeKind::Torus as usize].is_empty());
     }
 }
 

@@ -25,7 +25,7 @@ impl ShapeOverridePanel {
             }
         });
 
-        let labels: Vec<String> = if let Some(ds) = &state.dataset {
+        let labels: Vec<String> = if let Some(ds) = state.dataset() {
             ds.all_labels
                 .iter()
                 .filter(|l| {

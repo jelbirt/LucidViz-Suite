@@ -10,7 +10,7 @@ publish.workspace = true
 [features]
 audio        = ["dep:lv-audio"]
 export       = ["dep:lv-export"]
-video-export = []
+video-export = ["export"]
 
 [dependencies]
 lv-data.path     = "../lv-data"

@@ -1,6 +1,7 @@
 //! Beat scheduler — fires MIDI notes on each LIS frame advance.
 
 use lv_data::{EtvRow, LisFrame};
+use std::time::Duration;
 
 use crate::graduated::{graduated_note, GraduatedConfig};
 use crate::midi_engine::MidiEngine;
@@ -9,7 +10,7 @@ use crate::midi_engine::MidiEngine;
 struct PendingNoteOff {
     channel: u8,
     note: u8,
-    fire_at_slice: u32,
+    fire_at_frame: u32,
 }
 
 /// Drives MIDI note events from LIS frame advances.
@@ -37,6 +38,26 @@ impl BeatsScheduler {
             velocity: 64,
             hold_slices: 2,
         }
+    }
+
+    pub fn list_ports() -> Vec<String> {
+        MidiEngine::list_ports()
+    }
+
+    pub fn connect(&mut self, port_name: &str) -> Result<(), crate::midi_engine::MidiError> {
+        self.engine.connect(port_name)
+    }
+
+    pub fn disconnect(&mut self) {
+        self.stop();
+        let old_engine = std::mem::replace(&mut self.engine, MidiEngine::new());
+        old_engine.disconnect();
+    }
+
+    pub fn test_tone(&mut self) -> Result<(), crate::midi_engine::MidiError> {
+        self.engine.note_on(0, 60, 100, 0)?;
+        std::thread::sleep(Duration::from_millis(120));
+        self.engine.note_off(0, 60)
     }
 
     /// Effective beats: `min(beats, lis_value / 2)` to avoid over-firing.
@@ -67,12 +88,13 @@ impl BeatsScheduler {
         graduated: bool,
         grad_config: &GraduatedConfig,
     ) {
-        let slice = frame.local_slice;
+        let absolute_slice = frame.slice_index;
+        let local_slice = frame.local_slice;
 
         // ── fire pending note-offs ────────────────────────────────────────
         let mut i = 0;
         while i < self.pending_offs.len() {
-            if self.pending_offs[i].fire_at_slice == slice {
+            if self.pending_offs[i].fire_at_frame <= absolute_slice {
                 let off = self.pending_offs.remove(i);
                 let _ = self.engine.note_off(off.channel, off.note);
             } else {
@@ -82,7 +104,7 @@ impl BeatsScheduler {
 
         // ── decide whether to fire a beat on this slice ───────────────────
         let interval = self.beat_interval();
-        if interval == u32::MAX || !slice.is_multiple_of(interval) {
+        if interval == u32::MAX || !local_slice.is_multiple_of(interval) {
             return;
         }
 
@@ -102,11 +124,11 @@ impl BeatsScheduler {
             let _ = self.engine.note_on(channel, note, vel, instrument);
 
             // schedule note-off
-            let off_at = slice + self.hold_slices;
+            let off_at = absolute_slice + self.hold_slices;
             self.pending_offs.push(PendingNoteOff {
                 channel,
                 note,
-                fire_at_slice: off_at,
+                fire_at_frame: off_at,
             });
         }
     }
@@ -204,5 +226,46 @@ mod tests {
         };
         assert_eq!(sched.effective_beats(), 5);
         assert_eq!(sched.beat_interval(), 2);
+    }
+
+    #[test]
+    fn test_note_offs_follow_absolute_frame_index_across_transitions() {
+        let mut sched = BeatsScheduler::new(MidiEngine::new());
+        sched.beats = 1;
+        sched.lis_value = 10;
+        sched.hold_slices = 2;
+
+        let rows = vec![dummy_row()];
+        let grad = grad_cfg();
+
+        let firing_frame = LisFrame {
+            instances: vec![],
+            labels: vec![],
+            slice_index: 9,
+            transition_index: 0,
+            local_slice: 0,
+        };
+        sched.on_frame_advance(&firing_frame, &rows, false, &grad);
+        assert_eq!(sched.pending_offs.len(), 1);
+
+        let next_transition = LisFrame {
+            instances: vec![],
+            labels: vec![],
+            slice_index: 10,
+            transition_index: 1,
+            local_slice: 0,
+        };
+        sched.on_frame_advance(&next_transition, &rows, false, &grad);
+        assert_eq!(sched.pending_offs.len(), 2);
+
+        let release_frame = LisFrame {
+            instances: vec![],
+            labels: vec![],
+            slice_index: 11,
+            transition_index: 1,
+            local_slice: 1,
+        };
+        sched.on_frame_advance(&release_frame, &rows, false, &grad);
+        assert_eq!(sched.pending_offs.len(), 1);
     }
 }

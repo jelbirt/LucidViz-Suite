@@ -49,7 +49,7 @@ impl FileLoaderPanel {
             }
         }
 
-        if let Some(path) = &state.source_path {
+        if let Some(path) = state.source_path() {
             let can_reload = path.exists();
             if ui
                 .add_enabled(can_reload, egui::Button::new("Reload"))
@@ -71,12 +71,11 @@ impl FileLoaderPanel {
         ui.separator();
 
         // Dataset summary
-        if let Some(ds) = &state.dataset {
+        if let Some(ds) = state.dataset() {
             ui.label(format!(
                 "File: {}",
                 state
-                    .source_path
-                    .as_ref()
+                    .source_path()
                     .and_then(|p| p.file_name())
                     .and_then(|n| n.to_str())
                     .unwrap_or("<unknown>")
