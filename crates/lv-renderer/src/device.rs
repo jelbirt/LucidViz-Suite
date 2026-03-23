@@ -18,6 +18,39 @@ pub struct WgpuContext {
     pub config: wgpu::SurfaceConfiguration,
 }
 
+fn preferred_surface_format(formats: &[wgpu::TextureFormat]) -> Option<wgpu::TextureFormat> {
+    formats
+        .iter()
+        .find(|&&f| f == wgpu::TextureFormat::Bgra8UnormSrgb)
+        .copied()
+        .or_else(|| formats.first().copied())
+}
+
+fn preferred_present_mode(modes: &[wgpu::PresentMode]) -> wgpu::PresentMode {
+    if modes.contains(&wgpu::PresentMode::Fifo) {
+        wgpu::PresentMode::Fifo
+    } else {
+        wgpu::PresentMode::AutoVsync
+    }
+}
+
+unsafe fn create_surface_for_window(
+    instance: &wgpu::Instance,
+    window: &Window,
+) -> Result<wgpu::Surface<'static>> {
+    // SAFETY: `SurfaceTargetUnsafe::from_window` requires that the provided
+    // native window/display handles remain valid for as long as the created
+    // `wgpu::Surface` exists.
+    let target = unsafe { wgpu::SurfaceTargetUnsafe::from_window(window) }
+        .context("create wgpu surface target")?;
+
+    // SAFETY: `lv-app` owns the `Window` for the entire lifetime of the
+    // interactive `Renderer`, and `WgpuContext` is only dropped after the
+    // window/event loop teardown. This function centralizes that contract so the
+    // rest of the renderer never touches `create_surface_unsafe` directly.
+    unsafe { instance.create_surface_unsafe(target) }.context("create wgpu surface")
+}
+
 impl WgpuContext {
     /// Create a new `WgpuContext` bound to `window` (interactive mode).
     ///
@@ -32,15 +65,10 @@ impl WgpuContext {
             ..Default::default()
         });
 
-        // SAFETY: the window reference is valid for the lifetime of the app;
-        // we transmute to 'static to satisfy the wgpu surface lifetime.
-        let surface = unsafe {
-            let target = wgpu::SurfaceTargetUnsafe::from_window(window)
-                .context("create wgpu surface target")?;
-            instance
-                .create_surface_unsafe(target)
-                .context("create wgpu surface")?
-        };
+        // SAFETY: the interactive app keeps the window alive until after the
+        // renderer and context are dropped. `create_surface_for_window`
+        // encapsulates that invariant in one place.
+        let surface = unsafe { create_surface_for_window(&instance, window)? };
 
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
@@ -60,19 +88,10 @@ impl WgpuContext {
         .context("request wgpu device")?;
 
         let caps = surface.get_capabilities(&adapter);
-        let format = caps
-            .formats
-            .iter()
-            .find(|&&f| f == wgpu::TextureFormat::Bgra8UnormSrgb)
-            .copied()
-            .or_else(|| caps.formats.first().copied())
+        let format = preferred_surface_format(&caps.formats)
             .context("surface reported no supported formats")?;
 
-        let present_mode = if caps.present_modes.contains(&wgpu::PresentMode::Fifo) {
-            wgpu::PresentMode::Fifo
-        } else {
-            wgpu::PresentMode::AutoVsync
-        };
+        let present_mode = preferred_present_mode(&caps.present_modes);
 
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -178,5 +197,46 @@ impl WgpuContext {
             view_formats: &[],
         });
         texture.create_view(&wgpu::TextureViewDescriptor::default())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{preferred_present_mode, preferred_surface_format};
+
+    #[test]
+    fn preferred_surface_format_prefers_bgra8_srgb() {
+        let formats = [
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+            wgpu::TextureFormat::Bgra8UnormSrgb,
+        ];
+
+        assert_eq!(
+            preferred_surface_format(&formats),
+            Some(wgpu::TextureFormat::Bgra8UnormSrgb)
+        );
+    }
+
+    #[test]
+    fn preferred_surface_format_falls_back_to_first_supported_format() {
+        let formats = [wgpu::TextureFormat::Rgba8UnormSrgb];
+
+        assert_eq!(
+            preferred_surface_format(&formats),
+            Some(wgpu::TextureFormat::Rgba8UnormSrgb)
+        );
+        assert_eq!(preferred_surface_format(&[]), None);
+    }
+
+    #[test]
+    fn preferred_present_mode_prefers_fifo_when_available() {
+        assert_eq!(
+            preferred_present_mode(&[wgpu::PresentMode::Immediate, wgpu::PresentMode::Fifo]),
+            wgpu::PresentMode::Fifo
+        );
+        assert_eq!(
+            preferred_present_mode(&[wgpu::PresentMode::Immediate]),
+            wgpu::PresentMode::AutoVsync
+        );
     }
 }

@@ -16,7 +16,6 @@ wasm      = ["dep:getrandom"]   # wasm32-unknown-unknown compatibility
 lv-data.path = "../lv-data"
 
 nalgebra.workspace        = true
-faer.workspace            = true
 ndarray.workspace         = true
 rayon.workspace           = true
 petgraph.workspace        = true

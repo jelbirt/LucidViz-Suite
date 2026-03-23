@@ -1,7 +1,7 @@
 //! Per-shape GPU instance buffers.
 //!
-//! One `wgpu::Buffer` is maintained per `ShapeKind`. Buffers are grown (but
-//! never shrunk) as needed when new instance data arrives.
+//! One `wgpu::Buffer` is maintained per `ShapeKind`. Buffers grow as needed and
+//! can compact after large downshifts in instance count.
 
 use lv_data::{GpuInstance, ShapeKind};
 use wgpu::util::DeviceExt;
@@ -12,6 +12,7 @@ const SHAPE_COUNT: usize = ShapeKind::ALL.len(); // 6
 pub struct InstanceBuffer {
     buffers: [Option<wgpu::Buffer>; SHAPE_COUNT],
     capacities: [u64; SHAPE_COUNT],
+    counts: [u32; SHAPE_COUNT],
 }
 
 impl InstanceBuffer {
@@ -19,6 +20,7 @@ impl InstanceBuffer {
         Self {
             buffers: [const { None }; SHAPE_COUNT],
             capacities: [0; SHAPE_COUNT],
+            counts: [0; SHAPE_COUNT],
         }
     }
 
@@ -30,15 +32,20 @@ impl InstanceBuffer {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) {
+        let idx = shape as usize;
         if instances.is_empty() {
+            self.counts[idx] = 0;
             return;
         }
 
-        let idx = shape as usize;
         let bytes = bytemuck::cast_slice::<GpuInstance, u8>(instances);
         let need = bytes.len() as u64;
+        self.counts[idx] = instances.len() as u32;
 
-        if self.capacities[idx] < need {
+        let should_shrink = self.capacities[idx] > need.saturating_mul(4)
+            && self.capacities[idx] > (64 * 1024) as u64;
+
+        if self.capacities[idx] < need || should_shrink {
             // (Re)allocate a buffer large enough
             let buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(&format!("inst_buf_{idx}")),
@@ -59,9 +66,8 @@ impl InstanceBuffer {
     }
 
     /// Number of instances that can be drawn for `shape` (based on what was last updated).
-    pub fn instance_count(&self, shape: ShapeKind, instances: &[GpuInstance]) -> u32 {
-        let _ = shape;
-        instances.len() as u32
+    pub fn instance_count(&self, shape: ShapeKind) -> u32 {
+        self.counts[shape as usize]
     }
 
     /// Set the instance buffer for `shape` and record a `draw_indexed` call.

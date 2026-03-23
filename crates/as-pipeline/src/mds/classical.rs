@@ -1,10 +1,10 @@
 //! Classical (metric) MDS via eigendecomposition of the double-centred
 //! distance matrix.
 //!
-//! Uses ndarray for the double-centring step and faer for eigendecomposition.
+//! Uses ndarray for the double-centring step and nalgebra for eigendecomposition.
 
 use anyhow::{bail, Result};
-use faer::{Mat, Side};
+use nalgebra::{DMatrix, SymmetricEigen};
 use ndarray::Array2;
 
 use crate::error::AsError;
@@ -36,29 +36,28 @@ pub fn classical_mds(dist: &SeMatrix, dims: usize) -> Result<MdsCoordinates> {
     let col_means: Vec<f64> = (0..n).map(|j| d2.column(j).sum() / n as f64).collect();
     let grand_mean: f64 = row_means.iter().sum::<f64>() / n as f64;
 
-    // Convert B to faer::Mat for eigendecomposition.
-    let b_faer = Mat::<f64>::from_fn(n, n, |i, j| {
+    let b = DMatrix::<f64>::from_fn(n, n, |i, j| {
         -0.5 * (d2[[i, j]] - row_means[i] - col_means[j] + grand_mean)
     });
 
     // Step 3: Eigendecomposition of B (symmetric positive semi-definite).
-    // faer returns eigenvalues in ascending order.
-    let eig = b_faer
-        .self_adjoint_eigen(Side::Lower)
-        .map_err(|e| anyhow::anyhow!("Eigendecomposition failed: {:?}", e))?;
-
-    // eigenvalues: ascending (eig.S() is DiagRef)
-    // eigenvectors: eig.U() is MatRef n×n, column d is eigenvector for eigenvalue d
+    let eig = SymmetricEigen::new(b);
+    let mut eigenpairs: Vec<(f64, usize)> = eig
+        .eigenvalues
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(idx, value)| (value, idx))
+        .collect();
+    eigenpairs.sort_by(|a, b| b.0.total_cmp(&a.0));
 
     // Step 4: Take top `dims` eigenvalues (descending), clamp negatives to 0.
     let mut coords_data = vec![0.0f64; n * dims];
-    let s_col = eig.S().column_vector();
-    for d in 0..dims {
-        let idx = n - 1 - d; // ascending → top is at n-1
-        let lam = s_col[idx].max(0.0);
+    for (d, &(lam, idx)) in eigenpairs.iter().take(dims).enumerate() {
+        let lam = lam.max(0.0);
         let scale = lam.sqrt();
         for i in 0..n {
-            coords_data[i * dims + d] = eig.U()[(i, idx)] * scale;
+            coords_data[i * dims + d] = eig.eigenvectors[(i, idx)] * scale;
         }
     }
 

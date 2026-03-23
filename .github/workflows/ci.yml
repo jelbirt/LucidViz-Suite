@@ -74,7 +74,7 @@ jobs:
         run: cargo fmt --all -- --check
 
   wasm-check:
-    name: WASM scaffold build (lv-data)
+    name: WASM scaffold build
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -102,3 +102,19 @@ jobs:
           --no-default-features
           --features wasm
           -p lv-data
+
+      - name: Build as-pipeline for wasm32 (no-default-features + wasm)
+        run: >
+          cargo build
+          --target wasm32-unknown-unknown
+          --no-default-features
+          --features wasm
+          -p as-pipeline
+
+      - name: Build mf-pipeline for wasm32 (no-default-features + wasm)
+        run: >
+          cargo build
+          --target wasm32-unknown-unknown
+          --no-default-features
+          --features wasm
+          -p mf-pipeline
