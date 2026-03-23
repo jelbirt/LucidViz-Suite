@@ -32,7 +32,9 @@ use session::{
 #[cfg(feature = "audio")]
 use lv_audio::{BeatsScheduler, GraduatedConfig};
 #[cfg(feature = "export")]
-use lv_export::{capture_frame, capture_sequence_with_control, ImageFormat, SequenceConfig};
+use lv_export::{
+    capture_frame, capture_sequence_with_control, ImageFormat, SequenceConfig, SequenceControl,
+};
 #[cfg(all(feature = "export", feature = "video-export"))]
 use lv_export::{export_video_with_control, VideoConfig};
 
@@ -1011,8 +1013,10 @@ impl Renderer {
                             &lis_buffer,
                             &camera,
                             &seq_config,
-                            &progress_tx,
-                            Some(cancel_for_thread.as_ref()),
+                            SequenceControl {
+                                progress: &progress_tx,
+                                cancel: Some(cancel_for_thread.as_ref()),
+                            },
                         )
                         .map(|_| {
                             format!(

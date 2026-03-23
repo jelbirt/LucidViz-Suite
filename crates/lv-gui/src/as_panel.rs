@@ -400,13 +400,15 @@ impl AsPanel {
 
             let input = match build_mf_distance_input(
                 &output,
-                mds_config,
-                procrustes_mode,
-                dim_mode,
-                normalize,
-                normalization_mode,
-                target_range,
-                centrality_mode,
+                MfDistanceInputSettings {
+                    mds_config,
+                    procrustes_mode,
+                    mds_dims: dim_mode,
+                    normalize,
+                    normalization_mode,
+                    target_range,
+                    centrality_mode,
+                },
             ) {
                 Ok(input) => input,
                 Err(e) => {
@@ -525,8 +527,8 @@ fn preserve_lv_metadata(result: &mut AsPipelineResult, source: &EtvDataset) {
         EtvDataset::canonical_all_labels_from_sheets(&result.etv_dataset.sheets);
 }
 
-fn build_mf_distance_input(
-    mf_output: &mf_pipeline::types::MfOutput,
+#[derive(Debug, Clone)]
+struct MfDistanceInputSettings {
     mds_config: MdsConfig,
     procrustes_mode: ProcrustesMode,
     mds_dims: MdsDimMode,
@@ -534,6 +536,11 @@ fn build_mf_distance_input(
     normalization_mode: NormalizationMode,
     target_range: f64,
     centrality_mode: CentralityMode,
+}
+
+fn build_mf_distance_input(
+    mf_output: &mf_pipeline::types::MfOutput,
+    settings: MfDistanceInputSettings,
 ) -> Result<AsDistancePipelineInput, String> {
     mf_output
         .validate()
@@ -548,14 +555,14 @@ fn build_mf_distance_input(
 
     Ok(AsDistancePipelineInput {
         datasets: vec![("MatrixForge".to_string(), se)],
-        mds_config,
-        procrustes_mode,
-        mds_dims,
-        normalize,
-        normalization_mode,
-        target_range,
+        mds_config: settings.mds_config,
+        procrustes_mode: settings.procrustes_mode,
+        mds_dims: settings.mds_dims,
+        normalize: settings.normalize,
+        normalization_mode: settings.normalization_mode,
+        target_range: settings.target_range,
         procrustes_scale: true,
-        centrality_mode,
+        centrality_mode: settings.centrality_mode,
     })
 }
 
@@ -789,13 +796,15 @@ mod tests {
 
         let input = build_mf_distance_input(
             &mf_output,
-            MdsConfig::Classical,
-            ProcrustesMode::None,
-            MdsDimMode::Fixed(3),
-            true,
-            NormalizationMode::Independent,
-            300.0,
-            CentralityMode::Directed,
+            super::MfDistanceInputSettings {
+                mds_config: MdsConfig::Classical,
+                procrustes_mode: ProcrustesMode::None,
+                mds_dims: MdsDimMode::Fixed(3),
+                normalize: true,
+                normalization_mode: NormalizationMode::Independent,
+                target_range: 300.0,
+                centrality_mode: CentralityMode::Directed,
+            },
         )
         .expect("valid MF output should convert");
 
@@ -901,13 +910,15 @@ mod tests {
 
         let err = build_mf_distance_input(
             &mf_output,
-            MdsConfig::Classical,
-            ProcrustesMode::None,
-            MdsDimMode::Fixed(3),
-            true,
-            NormalizationMode::Independent,
-            300.0,
-            CentralityMode::Directed,
+            super::MfDistanceInputSettings {
+                mds_config: MdsConfig::Classical,
+                procrustes_mode: ProcrustesMode::None,
+                mds_dims: MdsDimMode::Fixed(3),
+                normalize: true,
+                normalization_mode: NormalizationMode::Independent,
+                target_range: 300.0,
+                centrality_mode: CentralityMode::Directed,
+            },
         )
         .expect_err("invalid MF output must fail");
 
