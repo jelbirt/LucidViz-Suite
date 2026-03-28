@@ -31,7 +31,6 @@ rust_xlsxwriter = "0.94"
 
 # Linear algebra
 nalgebra = "0.33"
-faer     = "0.21"
 ndarray  = "0.16"   # pinned; 0.17 has breaking API changes vs nalgebra compat layer
 rayon    = "1.10"
 
@@ -63,9 +62,8 @@ thiserror = "2.0"
 pollster  = "0.3"
 sha2      = "0.10"
 rfd       = "0.17"
-num_cpus  = "1.16"
 rand      = { version = "0.8", features = ["small_rng"] }
-getrandom = { version = "0.2", features = ["js"] }
+getrandom = { version = "0.2" }
 dirs-next = "2.0"
 tempfile  = "3"
 

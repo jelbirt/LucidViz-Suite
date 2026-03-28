@@ -1,36 +1,47 @@
 //! Stop-word filtering using the `stop-words` crate.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::sync::Mutex;
 
 use crate::types::Token;
+
+/// Cached stop-word sets keyed by language code.
+static STOPWORD_CACHE: std::sync::LazyLock<Mutex<HashMap<String, Option<HashSet<String>>>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Remove stop-words from `tokens` using the specified BCP 47 language tag.
 ///
 /// Issues a warning if the language is not supported and returns the unfiltered
 /// token list. Uses `catch_unwind` because the `stop-words` crate panics on
 /// unknown language codes rather than returning an empty list.
+///
+/// The stop-word set is cached across calls to avoid rebuilding on every invocation.
 pub fn filter_stopwords(tokens: Vec<Token>, language: &str) -> Vec<Token> {
-    // stop_words::get() panics on unsupported language codes, so we catch it.
-    let owned_lang = language.to_string();
-    let result = std::panic::catch_unwind(move || stop_words::get(&owned_lang));
-    let sw_list = match result {
-        Ok(list) => list,
-        Err(_) => {
-            eprintln!(
-                "[mf-pipeline] Warning: no stop-words found for language '{language}'; skipping filter"
-            );
-            return tokens;
-        }
+    let sw_set = {
+        let mut cache = STOPWORD_CACHE.lock().unwrap();
+        cache
+            .entry(language.to_string())
+            .or_insert_with(|| {
+                let owned_lang = language.to_string();
+                let result =
+                    std::panic::catch_unwind(move || stop_words::get(&owned_lang));
+                match result {
+                    Ok(list) if !list.is_empty() => {
+                        Some(list.iter().map(|s| s.to_string()).collect())
+                    }
+                    _ => None,
+                }
+            })
+            .clone()
     };
 
-    if sw_list.is_empty() {
+    let Some(sw_set) = sw_set else {
         eprintln!(
             "[mf-pipeline] Warning: no stop-words found for language '{language}'; skipping filter"
         );
         return tokens;
-    }
+    };
 
-    let sw_set: HashSet<String> = sw_list.iter().map(|s| s.to_string()).collect();
     tokens
         .into_iter()
         .filter(|t| !sw_set.contains(t.as_str()))
