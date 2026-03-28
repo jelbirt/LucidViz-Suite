@@ -11,13 +11,13 @@ const MAX_JSON_BYTES: u64 = 64 * 1024 * 1024;
 /// Serialise an [`EtvDataset`] to a pretty-printed JSON file.
 pub fn write_etv_json(dataset: &EtvDataset, path: &Path) -> Result<(), DataError> {
     let json = serde_json::to_string_pretty(dataset)?;
-    atomic_write(path, json.as_bytes())?;
+    crate::io_util::atomic_write(path, json.as_bytes())?;
     Ok(())
 }
 
 /// Deserialise an [`EtvDataset`] from a JSON file.
 pub fn read_etv_json(path: &Path) -> Result<EtvDataset, DataError> {
-    let bytes = read_bounded_file(path, MAX_JSON_BYTES)?;
+    let bytes = crate::io_util::read_bounded_file(path, MAX_JSON_BYTES)?;
     let mut dataset: EtvDataset = serde_json::from_slice(&bytes)?;
     dataset.canonicalize_all_labels();
     validate_dataset(&dataset)?;
@@ -43,34 +43,6 @@ pub fn read_etv_json_bytes(bytes: &[u8]) -> Result<EtvDataset, DataError> {
     dataset.canonicalize_all_labels();
     validate_dataset(&dataset)?;
     Ok(dataset)
-}
-
-fn read_bounded_file(path: &Path, limit: u64) -> Result<Vec<u8>, DataError> {
-    let metadata = std::fs::metadata(path)?;
-    if metadata.len() > limit {
-        return Err(DataError::FileTooLarge {
-            path: path.display().to_string(),
-            bytes: metadata.len(),
-            limit,
-        });
-    }
-    Ok(std::fs::read(path)?)
-}
-
-fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), DataError> {
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "path must have a file name",
-            )
-        })?;
-    let tmp_path = path.with_file_name(format!(".{file_name}.tmp-{}", std::process::id()));
-    std::fs::write(&tmp_path, bytes)?;
-    std::fs::rename(&tmp_path, path)?;
-    Ok(())
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

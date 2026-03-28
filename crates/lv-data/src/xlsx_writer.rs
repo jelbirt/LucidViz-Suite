@@ -4,29 +4,6 @@ use rust_xlsxwriter::{Format, Workbook};
 
 use crate::{DataError, EtvDataset, EtvRow, EtvSheet};
 
-fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), DataError> {
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "path must have a file name",
-            )
-        })?;
-    let tmp_path = path.with_file_name(format!(".{file_name}.tmp-{}", std::process::id()));
-    std::fs::write(&tmp_path, bytes)?;
-    if let Err(err) = std::fs::rename(&tmp_path, path) {
-        if path.exists() {
-            let _ = std::fs::remove_file(path);
-            std::fs::rename(&tmp_path, path)?;
-        } else {
-            return Err(err.into());
-        }
-    }
-    Ok(())
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Public API
 // ─────────────────────────────────────────────────────────────────────────────
@@ -34,7 +11,7 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), DataError> {
 /// Write an [`EtvDataset`] to an XLSX file at `path`.
 pub fn write_etv_xlsx(dataset: &EtvDataset, path: &Path) -> Result<(), DataError> {
     let bytes = write_etv_xlsx_bytes(dataset)?;
-    atomic_write(path, &bytes)?;
+    crate::io_util::atomic_write(path, &bytes)?;
     Ok(())
 }
 

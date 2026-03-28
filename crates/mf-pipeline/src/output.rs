@@ -174,56 +174,17 @@ fn write_square_matrix_sheet(
 }
 
 fn save_workbook_atomic(wb: &mut Workbook, path: &Path) -> Result<()> {
-    let tmp_path = temp_path(path)?;
-    wb.save(&tmp_path)
-        .map_err(|e| MfError::Xlsx(e.to_string()))?;
-    replace_file(&tmp_path, path)?;
+    lv_data::io_util::save_workbook_atomic(wb, path).map_err(|e| MfError::Xlsx(e.to_string()))?;
     Ok(())
 }
 
 fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
-    let tmp_path = temp_path(path)?;
-    std::fs::write(&tmp_path, bytes)?;
-    replace_file(&tmp_path, path)?;
+    lv_data::io_util::atomic_write(path, bytes)?;
     Ok(())
 }
 
 fn read_bounded_file(path: &Path, limit: u64) -> Result<Vec<u8>> {
-    let metadata = std::fs::metadata(path)?;
-    if metadata.len() > limit {
-        return Err(MfError::FileTooLarge {
-            path: path.display().to_string(),
-            bytes: metadata.len(),
-            limit,
-        }
-        .into());
-    }
-    Ok(std::fs::read(path)?)
-}
-
-fn temp_path(path: &Path) -> Result<std::path::PathBuf> {
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| {
-            MfError::Io(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "path must have file name",
-            ))
-        })?;
-    Ok(path.with_file_name(format!(".{file_name}.tmp-{}", std::process::id())))
-}
-
-fn replace_file(tmp_path: &Path, path: &Path) -> Result<()> {
-    if let Err(err) = std::fs::rename(tmp_path, path) {
-        if path.exists() {
-            let _ = std::fs::remove_file(path);
-            std::fs::rename(tmp_path, path)?;
-        } else {
-            return Err(err.into());
-        }
-    }
-    Ok(())
+    Ok(lv_data::io_util::read_bounded_file(path, limit)?)
 }
 
 #[cfg(test)]

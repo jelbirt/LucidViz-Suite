@@ -9,11 +9,11 @@ publish.workspace = true
 
 [features]
 default    = ["native-io"]
-native-io  = []   # enables XLSX/JSON file I/O; disable for wasm32 builds
+native-io  = ["dep:calamine"]   # enables XLSX/JSON file I/O; disable for wasm32 builds
 wasm       = []   # enables wasm32-unknown-unknown compilation
 
 [dependencies]
-calamine.workspace        = true
+calamine        = { workspace = true, optional = true }
 rust_xlsxwriter.workspace = true
 serde.workspace           = true
 serde_json.workspace      = true
@@ -21,6 +21,9 @@ anyhow.workspace          = true
 thiserror.workspace       = true
 log.workspace             = true
 bytemuck.workspace        = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [[test]]
 name = "round_trip_xlsx"

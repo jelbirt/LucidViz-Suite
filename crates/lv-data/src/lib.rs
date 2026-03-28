@@ -1,10 +1,9 @@
-#![allow(dead_code)]
-
 //! `lv-data` — shared data model and XLSX/JSON I/O for the Lucid Visualization Suite.
 
 pub mod analysis;
 pub mod bridge;
 pub mod error;
+pub mod io_util;
 pub mod schema;
 pub mod validation;
 

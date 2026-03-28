@@ -96,34 +96,11 @@ impl UserPreferences {
 }
 
 fn read_bounded_file(path: &std::path::Path, limit: u64) -> Result<Vec<u8>> {
-    let metadata = std::fs::metadata(path)?;
-    if metadata.len() > limit {
-        anyhow::bail!(
-            "prefs file '{}' is {} bytes, exceeding limit of {} bytes",
-            path.display(),
-            metadata.len(),
-            limit
-        );
-    }
-    Ok(std::fs::read(path)?)
+    Ok(lv_data::io_util::read_bounded_file(path, limit)?)
 }
 
 fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .context("path must have file name")?;
-    let tmp_path = path.with_file_name(format!(".{file_name}.tmp-{}", std::process::id()));
-    std::fs::write(&tmp_path, bytes)?;
-    if let Err(err) = std::fs::rename(&tmp_path, path) {
-        if path.exists() {
-            let _ = std::fs::remove_file(path);
-            std::fs::rename(&tmp_path, path)?;
-        } else {
-            return Err(err.into());
-        }
-    }
-    Ok(())
+    Ok(lv_data::io_util::atomic_write(path, bytes)?)
 }
 
 // ── tests ──────────────────────────────────────────────────────────────────────
