@@ -8,7 +8,7 @@ use anyhow::{bail, Context as _, Result};
 use lv_data::{EtvDataset, LisBuffer, LisConfig, LisFrame};
 use lv_renderer::{compute_frame, ArcballCamera, WgpuContext};
 
-use crate::snapshot::capture_frame;
+use crate::snapshot::SnapshotRenderer;
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
@@ -101,6 +101,7 @@ pub fn capture_sequence_with_control(
     }
     let total = (end + 1).saturating_sub(start).max(1) as f32;
     let ext = config.format.extension();
+    let renderer = SnapshotRenderer::new(ctx);
 
     for frame_idx in start..=end {
         if control
@@ -111,7 +112,8 @@ pub fn capture_sequence_with_control(
         }
         let frame = export_frame(dataset, lis_config, buffer, frame_idx)?;
 
-        let img = capture_frame(ctx, &frame, camera, config.width, config.height)
+        let img = renderer
+            .render_frame(ctx, &frame, camera, config.width, config.height)
             .with_context(|| format!("capture_frame {frame_idx}"))?;
 
         let filename = format!("{}_{frame_idx:06}.{ext}", config.filename_prefix);

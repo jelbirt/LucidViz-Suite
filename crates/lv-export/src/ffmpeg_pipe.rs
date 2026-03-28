@@ -15,7 +15,7 @@ use lv_data::{EtvDataset, LisBuffer, LisConfig};
 use lv_renderer::{ArcballCamera, WgpuContext};
 
 use crate::sequence::export_frame;
-use crate::snapshot::capture_frame;
+use crate::snapshot::SnapshotRenderer;
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
@@ -89,6 +89,27 @@ pub fn export_video_with_control(
     progress: &mpsc::Sender<f32>,
     cancel: Option<&AtomicBool>,
 ) -> Result<()> {
+    // Validate codec against known-safe values
+    const ALLOWED_CODECS: &[&str] = &[
+        "libx264",
+        "libx265",
+        "libvpx-vp9",
+        "prores_ks",
+        "libaom-av1",
+        "h264_nvenc",
+        "hevc_nvenc",
+    ];
+    if !ALLOWED_CODECS.contains(&vid_config.codec.as_str()) {
+        bail!(
+            "unsupported codec '{}'; allowed: {}",
+            vid_config.codec,
+            ALLOWED_CODECS.join(", ")
+        );
+    }
+    if vid_config.crf > 63 {
+        bail!("crf must be in [0, 63], got {}", vid_config.crf);
+    }
+
     // Verify ffmpeg is available
     Command::new("ffmpeg")
         .arg("-version")
@@ -144,6 +165,7 @@ pub fn export_video_with_control(
         );
     }
     let total = (end + 1).saturating_sub(start_frame).max(1) as f32;
+    let renderer = SnapshotRenderer::new(ctx);
 
     for frame_idx in start_frame..=end {
         if cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
@@ -151,7 +173,8 @@ pub fn export_video_with_control(
         }
         let frame = export_frame(dataset, lis_config, buffer, frame_idx)?;
 
-        let img = capture_frame(ctx, &frame, camera, width, height)
+        let img = renderer
+            .render_frame(ctx, &frame, camera, width, height)
             .with_context(|| format!("capture_frame {frame_idx}"))?;
 
         // Write raw RGBA bytes directly to ffmpeg stdin

@@ -70,9 +70,14 @@ pub const EDGE_VERTEX_LAYOUT: wgpu::VertexBufferLayout<'static> = wgpu::VertexBu
 // ── EdgeRenderer ──────────────────────────────────────────────────────────────
 
 /// Maintains GPU buffers for all visible edges and draws them.
+///
+/// Buffers are reused across frames when capacity is sufficient,
+/// and only reallocated when growing or shrinking significantly.
 pub struct EdgeRenderer {
     vertex_buf: Option<wgpu::Buffer>,
     index_buf: Option<wgpu::Buffer>,
+    vertex_capacity: u64,
+    index_capacity: u64,
     count: u32, // number of indices
 }
 
@@ -81,15 +86,15 @@ impl EdgeRenderer {
         Self {
             vertex_buf: None,
             index_buf: None,
+            vertex_capacity: 0,
+            index_capacity: 0,
             count: 0,
         }
     }
 
-    /// Re-upload edge data to the GPU.
-    pub fn update(&mut self, edges: &[GpuEdge], device: &wgpu::Device) {
+    /// Re-upload edge data to the GPU, reusing buffers when possible.
+    pub fn update(&mut self, edges: &[GpuEdge], device: &wgpu::Device, queue: &wgpu::Queue) {
         if edges.is_empty() {
-            self.vertex_buf = None;
-            self.index_buf = None;
             self.count = 0;
             return;
         }
@@ -115,20 +120,55 @@ impl EdgeRenderer {
 
         self.count = indices.len() as u32;
 
-        self.vertex_buf = Some(
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("edge_vertices"),
-                contents: bytemuck::cast_slice(&verts),
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            }),
-        );
-        self.index_buf = Some(
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("edge_indices"),
-                contents: bytemuck::cast_slice(&indices),
-                usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
-            }),
-        );
+        let vert_bytes = bytemuck::cast_slice::<EdgeVertex, u8>(&verts);
+        let idx_bytes = bytemuck::cast_slice::<u32, u8>(&indices);
+        let vert_need = vert_bytes.len() as u64;
+        let idx_need = idx_bytes.len() as u64;
+
+        let should_realloc_verts = self.vertex_capacity < vert_need
+            || (self.vertex_capacity > vert_need.saturating_mul(4)
+                && self.vertex_capacity > 64 * 1024);
+        let should_realloc_idx = self.index_capacity < idx_need
+            || (self.index_capacity > idx_need.saturating_mul(4)
+                && self.index_capacity > 64 * 1024);
+
+        if should_realloc_verts {
+            self.vertex_buf = Some(
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("edge_vertices"),
+                    contents: vert_bytes,
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                }),
+            );
+            self.vertex_capacity = vert_need;
+        } else {
+            queue.write_buffer(
+                self.vertex_buf
+                    .as_ref()
+                    .expect("vertex buffer must exist when capacity > 0"),
+                0,
+                vert_bytes,
+            );
+        }
+
+        if should_realloc_idx {
+            self.index_buf = Some(
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("edge_indices"),
+                    contents: idx_bytes,
+                    usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+                }),
+            );
+            self.index_capacity = idx_need;
+        } else {
+            queue.write_buffer(
+                self.index_buf
+                    .as_ref()
+                    .expect("index buffer must exist when capacity > 0"),
+                0,
+                idx_bytes,
+            );
+        }
     }
 
     /// Draw all edges. Caller must have already set the edge pipeline + bind group.

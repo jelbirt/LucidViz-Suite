@@ -208,8 +208,8 @@ fn fill_rect(img: &mut RgbaImage, x: i32, y: i32, ww: i32, hh: i32, color: Rgba<
     }
 }
 
-/// Minimal 5×7 pixel-font bitmap for uppercase A–Z and '+' '-' '0'–'9'.
-/// Each char is stored as 7 rows × 5 bits (MSB = left column).
+/// Minimal 5x7 pixel-font bitmap for uppercase A-Z and '+' '-' '0'-'9'.
+/// Each char is stored as 7 rows x 5 bits (MSB = left column).
 fn char_bitmap(c: char) -> Option<[u8; 7]> {
     // 5-wide, 7-tall bitmaps, MSB = leftmost pixel
     Some(match c {
@@ -265,232 +265,10 @@ fn draw_label(img: &mut RgbaImage, text: &str, x: i32, y: i32, scale: i32, color
     }
 }
 
-// ── public API ────────────────────────────────────────────────────────────────
-
-/// Render a single `LisFrame` to an `RgbaImage` using the provided camera.
-///
-/// Creates offscreen textures, records a render command, submits to the GPU,
-/// and readbacks the pixels.  The Y-axis is flipped to match image conventions.
-///
-/// Axis lines (+X red, +Y green, +Z blue) and pixel-space labels are overlaid
-/// automatically to help viewers understand the spatial orientation of the scene.
-pub fn capture_frame(
-    ctx: &WgpuContext,
-    frame: &LisFrame,
-    camera: &ArcballCamera,
-    width: u32,
-    height: u32,
-) -> Result<RgbaImage> {
-    if width == 0 || height == 0 {
-        bail!("capture_frame: width and height must be > 0");
-    }
-
-    let device = &ctx.device;
-    let queue = &ctx.queue;
-
-    // ── Offscreen targets ─────────────────────────────────────────────────────
-    let color_format = wgpu::TextureFormat::Rgba8UnormSrgb;
-    let (color_tex, color_view) = make_render_target(device, width, height);
-    let depth_view = make_depth(device, width, height);
-
-    // ── Build meshes ──────────────────────────────────────────────────────────
-    let meshes = build_all_meshes(device, Lod::Mid);
-
-    // ── Shape pipeline ────────────────────────────────────────────────────────
-    let bgl = pipelines::uniform_bind_group_layout(device);
-    let shape_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("snap_shape_shader"),
-        source: wgpu::ShaderSource::Wgsl(
-            include_str!("../../../assets/shaders/shape_instanced.wgsl").into(),
-        ),
-    });
-    let shape_pipeline = pipelines::create_shape_pipeline_with_format(
-        device,
-        &shape_shader,
-        &bgl,
-        color_format,
-        WgpuContext::DEPTH_FORMAT,
-    );
-
-    // ── Axis pipeline ─────────────────────────────────────────────────────────
-    let axis_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("snap_axis_shader"),
-        source: wgpu::ShaderSource::Wgsl(include_str!("../../../assets/shaders/axis.wgsl").into()),
-    });
-    let axis_pipeline = pipelines::create_axis_pipeline_with_format(
-        device,
-        &axis_shader,
-        &bgl,
-        color_format,
-        WgpuContext::DEPTH_FORMAT,
-    );
-
-    let axis_verts = build_axis_vertices();
-    let axis_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("axis_vbuf"),
-        contents: bytemuck::cast_slice(&axis_verts),
-        usage: wgpu::BufferUsages::VERTEX,
-    });
-
-    // ── Uniforms (shared by both pipelines via same BGL) ──────────────────────
-    let mut snap_cam = camera.clone();
-    snap_cam.set_aspect(width, height);
-    let vp: [[f32; 4]; 4] = snap_cam.view_proj().into();
-    let uniforms = ShapeUniforms {
-        view_proj: vp,
-        light_dir: [0.577_350_26, 0.577_350_26, 0.577_350_26],
-        ambient: 0.2,
-    };
-    let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("snap_uniforms"),
-        contents: bytemuck::bytes_of(&uniforms),
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-    });
-    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("snap_bg"),
-        layout: &bgl,
-        entries: &[wgpu::BindGroupEntry {
-            binding: 0,
-            resource: uniform_buf.as_entire_binding(),
-        }],
-    });
-
-    // ── Encode render pass ────────────────────────────────────────────────────
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("snap_encoder"),
-    });
-    {
-        let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("snap_pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &color_view,
-                resolve_target: None,
-                depth_slice: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color {
-                        r: 0.05,
-                        g: 0.05,
-                        b: 0.08,
-                        a: 1.0,
-                    }),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: &depth_view,
-                depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(1.0),
-                    store: wgpu::StoreOp::Discard,
-                }),
-                stencil_ops: None,
-            }),
-            timestamp_writes: None,
-            occlusion_query_set: None,
-        });
-
-        // ── Draw shapes ───────────────────────────────────────────────────────
-        rpass.set_pipeline(&shape_pipeline);
-        rpass.set_bind_group(0, &bind_group, &[]);
-
-        for (i, kind) in ShapeKind::ALL.iter().enumerate() {
-            let insts: Vec<GpuInstance> = frame
-                .instances
-                .iter()
-                .filter(|inst| inst.shape_id == kind.gpu_id())
-                .copied()
-                .collect();
-            if insts.is_empty() {
-                continue;
-            }
-
-            let inst_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("snap_inst"),
-                contents: bytemuck::cast_slice::<GpuInstance, u8>(&insts),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-            let mesh = &meshes[i];
-            rpass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-            rpass.set_vertex_buffer(1, inst_buf.slice(..));
-            rpass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-            rpass.draw_indexed(0..mesh.index_count, 0, 0..insts.len() as u32);
-        }
-
-        // ── Draw axis lines (same render pass, after shapes) ──────────────────
-        rpass.set_pipeline(&axis_pipeline);
-        rpass.set_bind_group(0, &bind_group, &[]);
-        rpass.set_vertex_buffer(0, axis_buf.slice(..));
-        rpass.draw(0..axis_verts.len() as u32, 0..1);
-    }
-
-    // ── Copy to readable buffer ───────────────────────────────────────────────
-    let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-    let bytes_per_row_raw = width * 4;
-    let bytes_per_row = bytes_per_row_raw.div_ceil(align) * align;
-    let buf_size = (bytes_per_row * height) as u64;
-
-    let readback = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("snap_readback"),
-        size: buf_size,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
-    encoder.copy_texture_to_buffer(
-        wgpu::TexelCopyTextureInfo {
-            texture: &color_tex,
-            mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
-        },
-        wgpu::TexelCopyBufferInfo {
-            buffer: &readback,
-            layout: wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(bytes_per_row),
-                rows_per_image: Some(height),
-            },
-        },
-        wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
-    );
-    queue.submit(std::iter::once(encoder.finish()));
-
-    // ── Map + copy ────────────────────────────────────────────────────────────
-    let slice = readback.slice(..);
-    let (tx, rx) = std::sync::mpsc::channel();
-    slice.map_async(wgpu::MapMode::Read, move |r| {
-        let _ = tx.send(r);
-    });
-    let _ = device.poll(wgpu::PollType::Wait {
-        submission_index: None,
-        timeout: None,
-    });
-    rx.recv()
-        .context("map_async recv")?
-        .context("map_async error")?;
-
-    let data = slice.get_mapped_range();
-    let bpr = bytes_per_row as usize;
-    let bpur = (width * 4) as usize;
-
-    // Flip Y: top of image = bottom of GPU framebuffer
-    let mut pixels: Vec<u8> = Vec::with_capacity((width * height * 4) as usize);
-    for row in (0..height as usize).rev() {
-        pixels.extend_from_slice(&data[row * bpr..row * bpr + bpur]);
-    }
-    drop(data);
-    readback.unmap();
-
-    let mut img = RgbaImage::from_raw(width, height, pixels)
-        .context("failed to create RgbaImage from captured pixels")?;
-
-    // ── 2-D pixel label overlay ───────────────────────────────────────────────
-    // Project the tip of each axis into screen space and draw a text label
-    // slightly beyond it so it doesn't overlap the arrowhead.
-    let label_offset = 18i32; // pixels past the projected tip
-    let scale = 2i32; // pixel scale for the 5×7 font
+/// Overlay axis labels and corner legend onto the rendered image.
+fn overlay_axis_labels(img: &mut RgbaImage, vp: &[[f32; 4]; 4], width: u32, height: u32) {
+    let label_offset = 18i32;
+    let scale = 2i32;
 
     let labels: &[([f32; 3], &str, Rgba<u8>)] = &[
         ([AXIS_LEN * 1.08, 0.0, 0.0], "+X", Rgba([245, 60, 60, 255])),
@@ -499,8 +277,7 @@ pub fn capture_frame(
     ];
 
     for (world, text, color) in labels {
-        if let Some((px, py)) = project(*world, &vp, width, height) {
-            // Nudge label a few pixels away from the tip toward centre of screen
+        if let Some((px, py)) = project(*world, vp, width, height) {
             let cx = width as i32 / 2;
             let cy = height as i32 / 2;
             let dx = px - cx;
@@ -508,13 +285,11 @@ pub fn capture_frame(
             let len = ((dx * dx + dy * dy) as f32).sqrt().max(1.0);
             let ox = (dx as f32 / len * label_offset as f32) as i32;
             let oy = (dy as f32 / len * label_offset as f32) as i32;
-            draw_label(&mut img, text, px + ox, py + oy, scale, *color);
+            draw_label(img, text, px + ox, py + oy, scale, *color);
         }
     }
 
-    // ── Corner legend ─────────────────────────────────────────────────────────
-    // Small fixed-position legend in the bottom-left corner so it is always
-    // readable regardless of camera angle.
+    // Corner legend
     let legend = [
         ("+X", Rgba([245, 60, 60, 230u8])),
         ("+Y", Rgba([60, 235, 100, 230u8])),
@@ -523,9 +298,265 @@ pub fn capture_frame(
     let lx = 14i32;
     let mut ly = height as i32 - 14 - (legend.len() as i32) * (7 * scale + 4);
     for (text, color) in &legend {
-        draw_label(&mut img, text, lx, ly, scale, *color);
+        draw_label(img, text, lx, ly, scale, *color);
         ly += 7 * scale + 4;
     }
+}
 
-    Ok(img)
+// ── SnapshotRenderer ─────────────────────────────────────────────────────────
+
+/// Caches GPU pipelines, meshes, and axis geometry across multiple frame
+/// captures, avoiding redundant pipeline/mesh rebuilds in sequence exports.
+pub struct SnapshotRenderer {
+    meshes: Vec<GpuMesh>,
+    shape_pipeline: wgpu::RenderPipeline,
+    axis_pipeline: wgpu::RenderPipeline,
+    bgl: wgpu::BindGroupLayout,
+    axis_buf: wgpu::Buffer,
+    axis_vert_count: u32,
+}
+
+impl SnapshotRenderer {
+    /// Build cached GPU resources (meshes, shaders, pipelines) once.
+    pub fn new(ctx: &WgpuContext) -> Self {
+        let device = &ctx.device;
+        let color_format = wgpu::TextureFormat::Rgba8UnormSrgb;
+
+        let meshes = build_all_meshes(device, Lod::Mid);
+        let bgl = pipelines::uniform_bind_group_layout(device);
+
+        let shape_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("snap_shape_shader"),
+            source: wgpu::ShaderSource::Wgsl(
+                include_str!("../../../assets/shaders/shape_instanced.wgsl").into(),
+            ),
+        });
+        let shape_pipeline = pipelines::create_shape_pipeline_with_format(
+            device,
+            &shape_shader,
+            &bgl,
+            color_format,
+            WgpuContext::DEPTH_FORMAT,
+        );
+
+        let axis_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("snap_axis_shader"),
+            source: wgpu::ShaderSource::Wgsl(
+                include_str!("../../../assets/shaders/axis.wgsl").into(),
+            ),
+        });
+        let axis_pipeline = pipelines::create_axis_pipeline_with_format(
+            device,
+            &axis_shader,
+            &bgl,
+            color_format,
+            WgpuContext::DEPTH_FORMAT,
+        );
+
+        let axis_verts = build_axis_vertices();
+        let axis_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("axis_vbuf"),
+            contents: bytemuck::cast_slice(&axis_verts),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        Self {
+            meshes,
+            shape_pipeline,
+            axis_pipeline,
+            bgl,
+            axis_buf,
+            axis_vert_count: axis_verts.len() as u32,
+        }
+    }
+
+    /// Render a single frame using cached pipelines and meshes.
+    pub fn render_frame(
+        &self,
+        ctx: &WgpuContext,
+        frame: &LisFrame,
+        camera: &ArcballCamera,
+        width: u32,
+        height: u32,
+    ) -> Result<RgbaImage> {
+        if width == 0 || height == 0 {
+            bail!("render_frame: width and height must be > 0");
+        }
+
+        let device = &ctx.device;
+        let queue = &ctx.queue;
+
+        let (color_tex, color_view) = make_render_target(device, width, height);
+        let depth_view = make_depth(device, width, height);
+
+        let mut snap_cam = camera.clone();
+        snap_cam.set_aspect(width, height);
+        let vp: [[f32; 4]; 4] = snap_cam.view_proj().into();
+        let uniforms = ShapeUniforms {
+            view_proj: vp,
+            light_dir: [0.577_350_26, 0.577_350_26, 0.577_350_26],
+            ambient: 0.2,
+        };
+        let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("snap_uniforms"),
+            contents: bytemuck::bytes_of(&uniforms),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("snap_bg"),
+            layout: &self.bgl,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buf.as_entire_binding(),
+            }],
+        });
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("snap_encoder"),
+        });
+        {
+            let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("snap_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &color_view,
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.05,
+                            g: 0.05,
+                            b: 0.08,
+                            a: 1.0,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Discard,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+
+            rpass.set_pipeline(&self.shape_pipeline);
+            rpass.set_bind_group(0, &bind_group, &[]);
+
+            for (i, kind) in ShapeKind::ALL.iter().enumerate() {
+                let insts: Vec<GpuInstance> = frame
+                    .instances
+                    .iter()
+                    .filter(|inst| inst.shape_id == kind.gpu_id())
+                    .copied()
+                    .collect();
+                if insts.is_empty() {
+                    continue;
+                }
+
+                let inst_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("snap_inst"),
+                    contents: bytemuck::cast_slice::<GpuInstance, u8>(&insts),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+                let mesh = &self.meshes[i];
+                rpass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                rpass.set_vertex_buffer(1, inst_buf.slice(..));
+                rpass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                rpass.draw_indexed(0..mesh.index_count, 0, 0..insts.len() as u32);
+            }
+
+            rpass.set_pipeline(&self.axis_pipeline);
+            rpass.set_bind_group(0, &bind_group, &[]);
+            rpass.set_vertex_buffer(0, self.axis_buf.slice(..));
+            rpass.draw(0..self.axis_vert_count, 0..1);
+        }
+
+        let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+        let bytes_per_row_raw = width * 4;
+        let bytes_per_row = bytes_per_row_raw.div_ceil(align) * align;
+        let buf_size = (bytes_per_row * height) as u64;
+
+        let readback = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("snap_readback"),
+            size: buf_size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &color_tex,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &readback,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(bytes_per_row),
+                    rows_per_image: Some(height),
+                },
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        queue.submit(std::iter::once(encoder.finish()));
+
+        let slice = readback.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |r| {
+            let _ = tx.send(r);
+        });
+        let _ = device.poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: None,
+        });
+        rx.recv()
+            .context("map_async recv")?
+            .context("map_async error")?;
+
+        let data = slice.get_mapped_range();
+        let bpr = bytes_per_row as usize;
+        let bpur = (width * 4) as usize;
+
+        // Flip Y: top of image = bottom of GPU framebuffer
+        let mut pixels: Vec<u8> = Vec::with_capacity((width * height * 4) as usize);
+        for row in (0..height as usize).rev() {
+            pixels.extend_from_slice(&data[row * bpr..row * bpr + bpur]);
+        }
+        drop(data);
+        readback.unmap();
+
+        let mut img = RgbaImage::from_raw(width, height, pixels)
+            .context("failed to create RgbaImage from captured pixels")?;
+
+        overlay_axis_labels(&mut img, &vp, width, height);
+
+        Ok(img)
+    }
+}
+
+// ── public API ────────────────────────────────────────────────────────────────
+
+/// Render a single `LisFrame` to an `RgbaImage` using the provided camera.
+///
+/// This is a convenience wrapper that creates a temporary `SnapshotRenderer`.
+/// For multi-frame exports, use [`SnapshotRenderer`] directly to avoid
+/// rebuilding GPU pipelines and meshes on every frame.
+pub fn capture_frame(
+    ctx: &WgpuContext,
+    frame: &LisFrame,
+    camera: &ArcballCamera,
+    width: u32,
+    height: u32,
+) -> Result<RgbaImage> {
+    let renderer = SnapshotRenderer::new(ctx);
+    renderer.render_frame(ctx, frame, camera, width, height)
 }

@@ -11,7 +11,7 @@ pub use ffmpeg_pipe::{export_video, export_video_with_control, VideoConfig};
 pub use sequence::{
     capture_sequence, capture_sequence_with_control, ImageFormat, SequenceConfig, SequenceControl,
 };
-pub use snapshot::capture_frame;
+pub use snapshot::{capture_frame, SnapshotRenderer};
 
 #[cfg(test)]
 mod tests {
