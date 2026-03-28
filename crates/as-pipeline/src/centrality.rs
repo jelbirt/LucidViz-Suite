@@ -101,6 +101,13 @@ struct State {
     node: usize,
 }
 
+impl State {
+    fn new(cost: f64, node: usize) -> Self {
+        debug_assert!(!cost.is_nan(), "State cost must not be NaN");
+        Self { cost, node }
+    }
+}
+
 impl Eq for State {}
 
 impl Ord for State {
@@ -180,7 +187,7 @@ fn shortest_paths_from(weighted_adj: &[Vec<(usize, f64)>], s: usize) -> Vec<f64>
     let mut heap = BinaryHeap::new();
 
     dist[s] = 0.0;
-    heap.push(State { cost: 0.0, node: s });
+    heap.push(State::new(0.0, s));
 
     while let Some(State { cost, node: v }) = heap.pop() {
         if cost > dist[v] + EPS {
@@ -193,10 +200,7 @@ fn shortest_paths_from(weighted_adj: &[Vec<(usize, f64)>], s: usize) -> Vec<f64>
             let next = dist[v] + (1.0 / weight);
             if next + EPS < dist[w] {
                 dist[w] = next;
-                heap.push(State {
-                    cost: next,
-                    node: w,
-                });
+                heap.push(State::new(next, w));
             }
         }
     }
@@ -230,7 +234,8 @@ fn parallel_brandes_betweenness(
     if directed {
         between.iter().map(|&b| b / norm).collect()
     } else {
-        between.iter().map(|&b| b / norm).collect()
+        // Undirected: each pair is counted from both endpoints, so divide by 2
+        between.iter().map(|&b| b / 2.0 / norm).collect()
     }
 }
 
@@ -247,7 +252,7 @@ fn brandes_source(weighted_adj: &[Vec<(usize, f64)>], n: usize, s: usize) -> Vec
 
     sigma[s] = 1.0;
     dist[s] = 0.0;
-    heap.push(State { cost: 0.0, node: s });
+    heap.push(State::new(0.0, s));
 
     while let Some(State { cost, node: v }) = heap.pop() {
         if cost > dist[v] + EPS || settled[v] {
@@ -265,10 +270,7 @@ fn brandes_source(weighted_adj: &[Vec<(usize, f64)>], n: usize, s: usize) -> Vec
                 sigma[w] = sigma[v];
                 pred[w].clear();
                 pred[w].push(v);
-                heap.push(State {
-                    cost: next,
-                    node: w,
-                });
+                heap.push(State::new(next, w));
             } else if (next - dist[w]).abs() <= EPS {
                 sigma[w] += sigma[v];
                 pred[w].push(v);
@@ -385,6 +387,22 @@ mod tests {
         assert_eq!(directed.degree, vec![0.5, 0.5, 0.0]);
         assert_ne!(directed.degree, undirected.degree);
         assert!(directed.distance[2] == 0.0);
+    }
+
+    #[test]
+    fn test_single_node_graph_no_edges() {
+        let adj = Array2::<f64>::zeros((1, 1));
+        let report = compute_centrality(&adj, &labels(1), CentralityMode::UndirectedLegacy)
+            .expect("single-node centrality should not panic");
+        assert_eq!(report.betweenness.len(), 1);
+        assert!(
+            report.betweenness[0].abs() < 1e-15,
+            "single-node betweenness should be zero, got {}",
+            report.betweenness[0]
+        );
+        assert_eq!(report.degree, vec![0.0]);
+        assert_eq!(report.distance, vec![0.0]);
+        assert_eq!(report.closeness, vec![0.0]);
     }
 
     #[test]
