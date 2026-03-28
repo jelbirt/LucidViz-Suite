@@ -14,7 +14,6 @@ wasm      = ["dep:getrandom"]   # wasm32-unknown-unknown compatibility
 
 [dependencies]
 lv-data.path     = "../lv-data"
-as-pipeline.path = "../as-pipeline"
 
 unicode-normalization.workspace = true
 unicode-segmentation.workspace  = true
@@ -26,10 +25,10 @@ serde_json.workspace            = true
 rust_xlsxwriter.workspace       = true
 anyhow.workspace                = true
 thiserror.workspace             = true
-num_cpus.workspace        = true
-getrandom = { workspace = true, optional = true }
+getrandom = { workspace = true, optional = true, features = ["js"] }
 
 [dev-dependencies]
+as-pipeline.path = "../as-pipeline"
 tempfile = "3"
 calamine.workspace  = true
 criterion.workspace = true

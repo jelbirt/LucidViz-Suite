@@ -1,10 +1,9 @@
-#![allow(dead_code)]
-
 //! `lv-gui` — egui immediate-mode panels for the Lucid Visualization Suite.
 //!
 //! See `implementation_plan.md` §5 for full specification.
 
 pub mod as_panel;
+pub mod bridge;
 pub mod mf_panel;
 pub mod panels;
 pub mod state;

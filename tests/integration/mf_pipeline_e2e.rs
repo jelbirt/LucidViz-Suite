@@ -3,13 +3,66 @@
 //! Reads sample_corpus.txt, runs the full MF pipeline, and validates output.
 
 use mf_pipeline::{
-    pipeline::{
-        mf_series_output_to_as_input, run_mf_pipeline, run_mf_series_pipeline,
-        MfSeriesAsInputOptions,
-    },
-    types::{MfConfig, MfPipelineConfig, MfSliceMode},
+    pipeline::{run_mf_pipeline, run_mf_series_pipeline},
+    types::{MfConfig, MfPipelineConfig, MfSeriesOutput, MfSliceMode},
 };
 use std::io::Write;
+
+use anyhow::Result;
+use as_pipeline::pipeline::mf_output_to_distance_matrix;
+use as_pipeline::types::{
+    AsDistancePipelineInput, CentralityMode, MdsConfig, MdsDimMode, NormalizationMode,
+    ProcrustesMode,
+};
+
+/// Options for converting MF series output to AS distance pipeline input.
+#[derive(Debug, Clone)]
+struct MfSeriesAsInputOptions {
+    mds_config: MdsConfig,
+    procrustes_mode: ProcrustesMode,
+    mds_dims: MdsDimMode,
+    normalize: bool,
+    normalization_mode: NormalizationMode,
+    target_range: f64,
+    procrustes_scale: bool,
+    centrality_mode: CentralityMode,
+}
+
+/// Local bridge function for testing: converts MF series output to AS input.
+fn mf_series_output_to_as_input(
+    output: &MfSeriesOutput,
+    options: MfSeriesAsInputOptions,
+) -> Result<AsDistancePipelineInput> {
+    output.validate_for_as_input()?;
+    let datasets = output
+        .slices
+        .iter()
+        .map(|slice| {
+            Ok((
+                slice.label.clone(),
+                mf_output_to_distance_matrix(
+                    slice.output.labels.clone(),
+                    &slice.output.similarity_matrix,
+                    slice.output.n,
+                    slice.output.sim_to_dist,
+                )
+                .map_err(|e| anyhow::anyhow!(e))?,
+            ))
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    Ok(AsDistancePipelineInput {
+        datasets,
+        mds_config: options.mds_config,
+        procrustes_mode: options.procrustes_mode,
+        mds_dims: options.mds_dims,
+        normalize: options.normalize,
+        normalization_mode: options.normalization_mode,
+        target_range: options.target_range,
+        procrustes_scale: options.procrustes_scale,
+        centrality_mode: options.centrality_mode,
+    })
+}
 
 fn corpus_path() -> std::path::PathBuf {
     std::path::PathBuf::from(concat!(

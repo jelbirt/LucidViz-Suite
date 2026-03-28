@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use std::thread;
 
+use crate::bridge::{mf_series_output_to_as_input, MfSeriesAsInputOptions};
 use as_pipeline::output::write_as_results;
 use as_pipeline::pipeline::{mf_output_to_distance_matrix, run_distance_pipeline, run_pipeline};
 use as_pipeline::types::{
@@ -12,7 +13,6 @@ use as_pipeline::types::{
     MdsDimMode, NormalizationMode, ProcrustesMode, SmacofConfig, SmacofInit,
 };
 use lv_data::{write_etv_json, EtvDataset};
-use mf_pipeline::pipeline::{mf_series_output_to_as_input, MfSeriesAsInputOptions};
 use ndarray::Array2;
 
 use crate::state::{
