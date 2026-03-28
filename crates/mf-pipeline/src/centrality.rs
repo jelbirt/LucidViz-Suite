@@ -12,82 +12,17 @@ use std::collections::BinaryHeap;
 
 use lv_data::CentralityReport;
 
-/// Compute degree, distance, closeness, and betweenness centrality from a
-/// petgraph co-occurrence graph.
-pub fn compute_centrality_mf(pg: &UnGraph<String, f64>, labels: &[String]) -> CentralityReport {
-    let n = pg.node_count();
-    let nodes: Vec<NodeIndex> = pg.node_indices().collect();
-
-    // --- Degree centrality ---
-    let degree: Vec<f64> = nodes
-        .iter()
-        .map(|&ni| {
-            let k = pg.edges(ni).count() as f64;
-            if n > 1 {
-                k / (n - 1) as f64
-            } else {
-                0.0
-            }
-        })
-        .collect();
-
-    // --- Shortest-path distances (Dijkstra, cost = 1/weight) ---
-    let dist_matrix: Vec<Vec<f64>> = nodes
-        .iter()
-        .map(|&src| {
-            let costs = dijkstra(pg, src, None, |e| {
-                let w = *e.weight();
-                if w > 0.0 {
-                    1.0 / w
-                } else {
-                    f64::INFINITY
-                }
-            });
-            nodes
-                .iter()
-                .map(|&tgt| costs.get(&tgt).copied().unwrap_or(f64::INFINITY))
-                .collect()
-        })
-        .collect();
-
-    // --- Distance / closeness centrality ---
-    let distance: Vec<f64> = (0..n)
-        .map(|i| {
-            let reachable: Vec<f64> = dist_matrix[i]
-                .iter()
-                .enumerate()
-                .filter(|(j, &d)| *j != i && d.is_finite())
-                .map(|(_, &d)| d)
-                .collect();
-            if reachable.is_empty() {
-                0.0
-            } else {
-                reachable.iter().sum::<f64>() / reachable.len() as f64
-            }
-        })
-        .collect();
-
-    let closeness: Vec<f64> = distance
-        .iter()
-        .map(|&d| if d > 1e-15 { 1.0 / d } else { 0.0 })
-        .collect();
-
-    // --- Parallel weighted Brandes betweenness ---
-    let betweenness = compute_betweenness_pg(pg);
-
-    CentralityReport {
-        labels: labels.to_vec(),
-        degree,
-        distance,
-        closeness,
-        betweenness,
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct State {
     cost: f64,
     node: usize,
+}
+
+impl State {
+    fn new(cost: f64, node: usize) -> Self {
+        debug_assert!(!cost.is_nan(), "State cost must not be NaN");
+        Self { cost, node }
+    }
 }
 
 impl Eq for State {}
@@ -141,7 +76,7 @@ fn brandes_source_adj(adj: &[Vec<(usize, f64)>], n: usize, s: usize) -> Vec<f64>
 
     sigma[s] = 1.0;
     dist[s] = 0.0;
-    heap.push(State { cost: 0.0, node: s });
+    heap.push(State::new(0.0, s));
 
     while let Some(State { cost, node: v }) = heap.pop() {
         if cost > dist[v] + EPS || settled[v] {
@@ -159,10 +94,7 @@ fn brandes_source_adj(adj: &[Vec<(usize, f64)>], n: usize, s: usize) -> Vec<f64>
                 sigma[w] = sigma[v];
                 pred[w].clear();
                 pred[w].push(v);
-                heap.push(State {
-                    cost: next,
-                    node: w,
-                });
+                heap.push(State::new(next, w));
             } else if (next - dist[w]).abs() <= EPS {
                 sigma[w] += sigma[v];
                 pred[w].push(v);
@@ -231,9 +163,9 @@ pub fn compute_centrality_full(pg: &UnGraph<String, f64>, labels: &[String]) -> 
         })
         .collect();
 
-    // Dijkstra distances.
+    // Dijkstra distances (parallelized across source nodes).
     let dist_matrix: Vec<Vec<f64>> = nodes
-        .iter()
+        .par_iter()
         .map(|&src| {
             let costs = dijkstra(pg, src, None, |e| {
                 let w = *e.weight();
@@ -302,7 +234,7 @@ mod tests {
     #[test]
     fn weighted_betweenness_prefers_stronger_two_hop_path() {
         let graph = graph_from_weighted_edges(3, &[(0, 1, 1.0), (1, 2, 1.0), (0, 2, 0.4)]);
-        let report = compute_centrality_mf(&graph, &labels(3));
+        let report = compute_centrality_full(&graph, &labels(3));
 
         assert!(report.betweenness[1] > report.betweenness[0]);
         assert!(report.betweenness[1] > report.betweenness[2]);
