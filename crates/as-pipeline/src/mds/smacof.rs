@@ -50,7 +50,8 @@ pub fn smacof(dist: &SeMatrix, dims: usize, cfg: &SmacofConfig) -> Result<MdsCoo
     }
 
     center_coords(&mut x, n, dims);
-    let stress = kruskal_stress(dist, &x, n, dims);
+    // Reuse the last computed stress instead of recalculating
+    let stress = prev_stress;
 
     Ok(MdsCoordinates::new(
         dist.labels.clone(),
@@ -65,13 +66,15 @@ pub fn smacof(dist: &SeMatrix, dims: usize, cfg: &SmacofConfig) -> Result<MdsCoo
 /// Parallelised over rows via rayon.
 fn guttman_step(dist: &SeMatrix, x: &[f64], n: usize, dims: usize) -> Vec<f64> {
     let n_f = n as f64;
-    // Precompute current pairwise distances.
-    let mut d_hat = vec![0.0f64; n * n];
-    for i in 0..n {
-        for j in 0..n {
-            d_hat[i * n + j] = euclidean_dist(x, i, j, dims);
-        }
-    }
+    // Precompute current pairwise distances (parallelized over rows).
+    let d_hat: Vec<f64> = (0..n)
+        .into_par_iter()
+        .flat_map(|i| {
+            (0..n)
+                .map(|j| euclidean_dist(x, i, j, dims))
+                .collect::<Vec<_>>()
+        })
+        .collect();
 
     // Compute B matrix, then multiply B*X and scale.
     // B[i,j] = { -delta_ij/d_hat_ij  if i!=j and d_hat>0 | 0 if d_hat=0 | -sum_{k!=i} B[i,k] diagonal }

@@ -55,10 +55,15 @@ impl FrameTimer {
         let advance_slices = match self.target_fps {
             None => {
                 // Free-running: one slice per vsync, scaled by speed.
-                self.accumulated_slices += self.speed;
-                let n = self.accumulated_slices.floor() as u32;
-                self.accumulated_slices -= n as f32;
-                n.max(1)
+                // Speed of 0.0 means paused — do not advance.
+                if self.speed == 0.0 {
+                    0
+                } else {
+                    self.accumulated_slices += self.speed;
+                    let n = self.accumulated_slices.floor() as u32;
+                    self.accumulated_slices -= n as f32;
+                    n.max(1)
+                }
             }
             Some(fps) => {
                 // Fixed FPS: accumulate fractional slices.
@@ -80,5 +85,37 @@ impl FrameTimer {
 impl Default for FrameTimer {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn speed_zero_produces_zero_advance_in_free_running() {
+        let mut timer = FrameTimer::new();
+        timer.set_speed(0.0);
+        // Consume the initial tick to set the baseline.
+        let _ = timer.tick();
+        let advance = timer.tick();
+        assert_eq!(
+            advance.advance_slices, 0,
+            "speed=0.0 in free-running mode should produce 0 advance slices"
+        );
+    }
+
+    #[test]
+    fn default_speed_produces_at_least_one_advance_in_free_running() {
+        let mut timer = FrameTimer::new();
+        // default speed is 1.0, target_fps is None (free-running)
+        assert_eq!(timer.speed, 1.0);
+        assert!(timer.target_fps.is_none());
+        let advance = timer.tick();
+        assert!(
+            advance.advance_slices >= 1,
+            "default speed (1.0) in free-running mode should produce advance_slices >= 1, got {}",
+            advance.advance_slices
+        );
     }
 }

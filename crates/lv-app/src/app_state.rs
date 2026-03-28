@@ -6,7 +6,7 @@
 use lv_data::{EdgeRow, EtvSheet};
 use lv_gui::EgoEdgeDirection;
 use lv_renderer::GpuEdge;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 // ── EgoClusterState ───────────────────────────────────────────────────────────
 
@@ -121,6 +121,16 @@ pub fn compute_visible_objects(sheet: &EtvSheet, state: &EgoClusterState) -> Has
     }
 
     if state.shared_objects_only {
+        // Pre-compute neighbor sets for all filtered nodes to avoid O(N*E) inner loop.
+        let neighbor_map: HashMap<&str, HashSet<String>> = filtered
+            .iter()
+            .map(|label| {
+                let neighbors =
+                    directional_neighbors(sheet, label, state.direction, &filtered);
+                (label.as_str(), neighbors)
+            })
+            .collect();
+
         // Keep only nodes (excluding selected) that appear in ≥2 other nodes'
         // direct ego-clusters.
         let candidates: Vec<String> = visible
@@ -131,14 +141,10 @@ pub fn compute_visible_objects(sheet: &EtvSheet, state: &EgoClusterState) -> Has
 
         let mut shared: HashSet<String> = HashSet::new();
         for candidate in &candidates {
-            // Count how many distinct other filtered nodes have an edge to candidate
-            let count = sheet
-                .rows
+            let count = neighbor_map
                 .iter()
-                .filter(|r| r.label != *candidate && filtered.contains(&r.label))
-                .filter(|r| {
-                    directional_neighbors(sheet, &r.label, state.direction, &filtered)
-                        .contains(candidate)
+                .filter(|(&label, neighbors)| {
+                    label != candidate.as_str() && neighbors.contains(candidate)
                 })
                 .count();
             if count >= 2 {

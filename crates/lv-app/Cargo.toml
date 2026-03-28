@@ -42,7 +42,6 @@ log.workspace        = true
 env_logger.workspace = true
 serde.workspace      = true
 serde_json.workspace = true
-num_cpus.workspace   = true
 pollster.workspace   = true
 rand.workspace       = true
 bytemuck.workspace   = true

@@ -388,6 +388,27 @@ mod tests {
     }
 
     #[test]
+    fn note_128_fails() {
+        let mut row = valid_row();
+        row.note = 128;
+        let errs = validate_row(&row);
+        assert!(
+            errs.iter().any(|e| e.contains("note")),
+            "note=128 should fail validation"
+        );
+    }
+
+    #[test]
+    fn note_127_passes() {
+        let mut row = valid_row();
+        row.note = 127;
+        assert!(
+            validate_row(&row).is_empty(),
+            "note=127 should pass validation"
+        );
+    }
+
+    #[test]
     fn dataset_validation_rejects_stale_all_labels() {
         let dataset = EtvDataset {
             source_path: None,

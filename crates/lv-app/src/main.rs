@@ -13,12 +13,12 @@ use std::path::Path;
 use std::sync::Arc;
 
 use app_state::{build_gpu_edges, compute_ego_edges, compute_visible_objects, EgoClusterState};
-use lv_data::{EtvDataset, EtvRow, EtvSheet, GpuInstance, LisBuffer, LisConfig, ShapeKind};
+use lv_data::{EtvDataset, GpuInstance, LisBuffer, LisConfig, ShapeKind};
 use lv_gui::state::PlayState;
 use lv_gui::{AppState, LucidWorkspace};
 use lv_renderer::shapes::{self, cube, cylinder, point, pyramid, sphere, torus};
 use lv_renderer::{
-    build_lis_buffer, compute_frame, AppAction, ArcballCamera, CameraKey, EdgeRenderer,
+    build_lis_buffer, compute_frame, pipelines, AppAction, ArcballCamera, CameraKey, EdgeRenderer,
     EdgeUniforms, FrameTimer, GpuMesh, InstanceBuffer, Lod, ShapeUniforms, WgpuContext,
     EDGE_VERTEX_LAYOUT,
 };
@@ -47,72 +47,17 @@ use winit::{
     window::{Window, WindowId},
 };
 
-// ── GpuInstance vertex buffer layout ─────────────────────────────────────────
-static INSTANCE_ATTRS: &[wgpu::VertexAttribute] = &[
-    wgpu::VertexAttribute {
-        shader_location: 2,
-        offset: 0,
-        format: wgpu::VertexFormat::Float32x3,
-    },
-    wgpu::VertexAttribute {
-        shader_location: 3,
-        offset: 12,
-        format: wgpu::VertexFormat::Float32,
-    },
-    wgpu::VertexAttribute {
-        shader_location: 4,
-        offset: 16,
-        format: wgpu::VertexFormat::Float32,
-    },
-    wgpu::VertexAttribute {
-        shader_location: 5,
-        offset: 20,
-        format: wgpu::VertexFormat::Float32x3,
-    },
-    wgpu::VertexAttribute {
-        shader_location: 6,
-        offset: 32,
-        format: wgpu::VertexFormat::Float32x4,
-    },
-    wgpu::VertexAttribute {
-        shader_location: 7,
-        offset: 48,
-        format: wgpu::VertexFormat::Float32x3,
-    },
-    wgpu::VertexAttribute {
-        shader_location: 8,
-        offset: 60,
-        format: wgpu::VertexFormat::Uint32,
-    },
-];
-
-const INSTANCE_LAYOUT: wgpu::VertexBufferLayout<'static> = wgpu::VertexBufferLayout {
-    array_stride: 64,
-    step_mode: wgpu::VertexStepMode::Instance,
-    attributes: INSTANCE_ATTRS,
-};
-
-// ── demo dataset ─────────────────────────────────────────────────────────────
-//
-// Global Trade Network, 2017-2024
-// ─────────────────────────────────────────────────────────────────────────────
-// 48 country-nodes in 5 regional clusters.  Each of the 8 sheets represents
-// one calendar year.  Node positions drift over time to show structural change
-// (e.g. US-China decoupling, post-Brexit UK drift, emerging-market rise).
-//
-// Encoding:
-//   Shape   → region  (Sphere=Americas, Cube=Europe, Cylinder=Asia-Pacific,
-//                       Torus=Africa/MENA, Pyramid=Central/South Asia)
-//   Color   → region palette (saturated, distinct)
-//   Size    → GDP tier (0.18 – 0.55)
-//   Cluster → GDP tier 0-4
-//   Spin    → trade velocity (large economies spin faster on Y-axis)
-//   Edges   → top bilateral trade relationships, strength ∝ trade volume
+mod demo;
 
 fn make_demo_dataset() -> EtvDataset {
-    // ── node catalogue ────────────────────────────────────────────────────────
-    // (label, region, gdp_tier 0-4, base_x, base_y, base_z, spin_y deg/frame)
-    #[allow(clippy::type_complexity)]
+    demo::make_demo_dataset()
+}
+
+// The 232-line demo dataset function has been moved to demo.rs.
+
+// The following block is compiled-out dead code from the original inline:
+#[cfg(any())]
+fn _removed() -> EtvDataset {
     let nodes: &[(&str, usize, u32, f64, f64, f64, f64)] = &[
         // Americas  (region 0)  shape=Sphere  colour=blue
         ("USA", 0, 4, 4.0, 1.5, 0.5, 0.8),
@@ -487,7 +432,7 @@ impl Renderer {
                 vertex: wgpu::VertexState {
                     module: &shader,
                     entry_point: Some("vs_main"),
-                    buffers: &[shapes::Vertex::LAYOUT, INSTANCE_LAYOUT],
+                    buffers: &[shapes::Vertex::LAYOUT, pipelines::instance_layout()],
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                 },
                 fragment: Some(wgpu::FragmentState {
@@ -1327,11 +1272,13 @@ impl Renderer {
                     sel,
                     self.ego_state.show_secondary,
                 );
-                self.edge_renderer.update(&gpu_edges, &self.ctx.device);
+                self.edge_renderer
+                    .update(&gpu_edges, &self.ctx.device, &self.ctx.queue);
             }
         } else {
             // Clear edges when no selection
-            self.edge_renderer.update(&[], &self.ctx.device);
+            self.edge_renderer
+                .update(&[], &self.ctx.device, &self.ctx.queue);
         }
 
         // ── acquire frame ──────────────────────────────────────────────────────

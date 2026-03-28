@@ -23,9 +23,9 @@ serde.workspace           = true
 serde_json.workspace      = true
 rust_xlsxwriter.workspace = true
 anyhow.workspace          = true
+log.workspace             = true
 thiserror.workspace       = true
-num_cpus.workspace        = true
-getrandom = { workspace = true, optional = true }
+getrandom = { workspace = true, optional = true, features = ["js"] }
 
 [dev-dependencies]
 criterion.workspace = true

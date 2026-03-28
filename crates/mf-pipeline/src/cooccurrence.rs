@@ -142,11 +142,13 @@ fn build_cooccurrence_for_vocab(
         }
     }
 
+    // Symmetrize by summing both halves. The parallel chunking scheme counts
+    // directional co-occurrences, so (i,j) and (j,i) should be combined.
     for i in 0..n {
         for j in (i + 1)..n {
-            let mirrored = total_mat[i * n + j].max(total_mat[j * n + i]);
-            total_mat[i * n + j] = mirrored;
-            total_mat[j * n + i] = mirrored;
+            let combined = total_mat[i * n + j] + total_mat[j * n + i];
+            total_mat[i * n + j] = combined;
+            total_mat[j * n + i] = combined;
         }
     }
 

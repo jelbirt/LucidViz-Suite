@@ -57,20 +57,28 @@ fn farthest_point_pivots(dist: &SeMatrix, k: usize) -> Vec<usize> {
         .unwrap_or(0);
 
     let mut selected = vec![start];
+    let mut selected_set = std::collections::HashSet::new();
+    selected_set.insert(start);
     // min_dist[i] = min distance from node i to any already-selected pivot.
     let mut min_dist: Vec<f64> = (0..n).map(|i| dist.get(start, i)).collect();
 
     while selected.len() < k {
         // Pick node with maximum min-distance to current pivot set.
-        let next = (0..n)
-            .filter(|i| !selected.contains(i))
+        let next = match (0..n)
+            .filter(|i| !selected_set.contains(i))
             .max_by(|&a, &b| {
                 min_dist[a]
                     .partial_cmp(&min_dist[b])
                     .unwrap_or(std::cmp::Ordering::Equal)
-            })
-            .unwrap_or(0);
+            }) {
+            Some(idx) => idx,
+            None => {
+                log::warn!("farthest_point_pivots: all remaining nodes have equal distance; stopping at {} pivots", selected.len());
+                break;
+            }
+        };
         selected.push(next);
+        selected_set.insert(next);
         // Update min_dist.
         for (i, min_d) in min_dist.iter_mut().enumerate() {
             let d = dist.get(next, i);

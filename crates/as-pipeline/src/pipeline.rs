@@ -37,7 +37,7 @@ pub fn run_pipeline(input: &AsPipelineInput) -> Result<AsPipelineResult> {
     let mut raw_coords: Vec<MdsCoordinates> = Vec::new();
     let mut centralities: Vec<CentralityState> = Vec::new();
 
-    for (name, adj) in &input.datasets {
+    for (_name, adj) in &input.datasets {
         // Compute SE matrix.
         let se = compute_se_matrix(adj, input.labels.clone())?;
         distance_matrices.push(se.clone());
@@ -49,8 +49,6 @@ pub fn run_pipeline(input: &AsPipelineInput) -> Result<AsPipelineResult> {
         // Compute centrality.
         let centrality = compute_centrality(adj, &input.labels, input.centrality_mode)?;
         centralities.push(CentralityState::Computed(centrality));
-
-        let _ = name; // used for future output naming
     }
 
     let procrustes_results =

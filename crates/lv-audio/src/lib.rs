@@ -3,8 +3,6 @@
 //! Enable the `midi` feature flag to get real MIDI output via `midir`.
 //! Without the feature, all operations are no-ops.
 
-#![allow(dead_code)]
-
 pub mod graduated;
 pub mod midi_engine;
 pub mod scheduler;

@@ -54,9 +54,10 @@ unsafe fn create_surface_for_window(
 impl WgpuContext {
     /// Create a new `WgpuContext` bound to `window` (interactive mode).
     ///
-    /// # Safety
+    /// # Contract
     /// The window must outlive the `WgpuContext`. The caller must ensure that
-    /// `window` is not dropped before this struct.
+    /// `window` is not dropped before this struct. The unsafety of
+    /// `create_surface_unsafe` is encapsulated internally.
     pub fn new(window: &Window) -> Result<Self> {
         let size = window.inner_size();
 

@@ -283,7 +283,10 @@ fn cell_optional_f64(
                     row: row_num,
                     col,
                     expected: "numeric value",
-                    actual: format!("{:?}", raw.get(col).unwrap()),
+                    actual: raw
+                        .get(col)
+                        .map(|v| format!("{v:?}"))
+                        .unwrap_or_else(|| "missing".to_string()),
                 })
         }
         Some(other) => Err(DataError::WrongCellType {
