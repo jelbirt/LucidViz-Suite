@@ -1,6 +1,6 @@
 //! Beat scheduler — fires MIDI notes on each LIS frame advance.
 
-use lv_data::{EtvRow, LisFrame};
+use lv_data::{LisFrame, LvRow};
 use std::time::Duration;
 
 use crate::graduated::{graduated_note, GraduatedConfig};
@@ -78,13 +78,13 @@ impl BeatsScheduler {
     /// Called once per rendered frame. Fires note-ons and note-offs as needed.
     ///
     /// * `frame`      — current LIS frame (provides `local_slice`)
-    /// * `rows`       — `EtvRow` data for the current time-slice
+    /// * `rows`       — `LvRow` data for the current time-slice
     /// * `graduated`  — whether to use graduated pitch mapping
     /// * `grad_config`— graduated mapping configuration
     pub fn on_frame_advance(
         &mut self,
         frame: &LisFrame,
-        rows: &[EtvRow],
+        rows: &[LvRow],
         graduated: bool,
         grad_config: &GraduatedConfig,
     ) {
@@ -155,14 +155,14 @@ mod tests {
         }
     }
 
-    fn dummy_row() -> EtvRow {
-        EtvRow {
+    fn dummy_row() -> LvRow {
+        LvRow {
             note: 60,
             channel: 0,
             velocity: 64,
             instrument: 0,
             size: 0.5,
-            ..EtvRow::default()
+            ..LvRow::default()
         }
     }
 

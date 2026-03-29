@@ -13,17 +13,17 @@ use crate::types::{
 /// Write the full AS pipeline result to a directory.
 ///
 /// Produces:
-///   - `ET-V.xlsx`                   (ETV dataset)
+///   - `LV.xlsx`                   (LV dataset)
 ///   - `Coordinates.xlsx`            (MDS coordinates for each time step)
 ///   - `Centralities.xlsx`           (Centrality report for each time step)
 ///   - `as_result.json`              (full result as JSON)
 pub fn write_as_results(result: &AsPipelineResult, out_dir: &Path) -> Result<()> {
     std::fs::create_dir_all(out_dir)?;
 
-    // Write ETV dataset via lv-data.
-    let etv_path = out_dir.join("ET-V.xlsx");
-    lv_data::xlsx_writer::write_etv_xlsx(&result.etv_dataset, &etv_path)
-        .context("Failed to write ET-V.xlsx")?;
+    // Write LV dataset via lv-data.
+    let lv_path = out_dir.join("LV.xlsx");
+    lv_data::xlsx_writer::write_lv_xlsx(&result.lv_dataset, &lv_path)
+        .context("Failed to write LV.xlsx")?;
 
     // Write coordinates workbook.
     write_coordinates_xlsx(&result.coordinates, &out_dir.join("Coordinates.xlsx"))?;
@@ -130,7 +130,7 @@ fn write_as_json(result: &AsPipelineResult, path: &Path) -> Result<()> {
         centralities: &'a [CentralityState],
         centrality_mode: CentralityMode,
         distance_matrices: &'a [DistanceMatrix],
-        etv_dataset: &'a lv_data::schema::EtvDataset,
+        lv_dataset: &'a lv_data::schema::LvDataset,
     }
 
     let jr = JsonResult {
@@ -139,7 +139,7 @@ fn write_as_json(result: &AsPipelineResult, path: &Path) -> Result<()> {
         centralities: &result.centralities,
         centrality_mode: result.centrality_mode,
         distance_matrices: &result.distance_matrices,
-        etv_dataset: &result.etv_dataset,
+        lv_dataset: &result.lv_dataset,
     };
 
     let json = serde_json::to_string_pretty(&jr)?;
@@ -165,11 +165,11 @@ mod tests {
         AsPipelineResult, CentralityMode, CentralityState, DistanceMatrix, MdsAlgorithm,
         MdsCoordinates, ProcrustesResult,
     };
-    use lv_data::schema::EtvDataset;
+    use lv_data::schema::LvDataset;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
-    fn write_as_json_includes_procrustes_and_etv_dataset() {
+    fn write_as_json_includes_procrustes_and_lv_dataset() {
         let result = AsPipelineResult {
             coordinates: vec![MdsCoordinates::new(
                 vec!["alpha".into()],
@@ -200,7 +200,7 @@ mod tests {
             centrality_mode: CentralityMode::Directed,
             distance_matrices: vec![DistanceMatrix::new(vec!["alpha".into()], vec![0.0])
                 .expect("test distance matrix should build")],
-            etv_dataset: EtvDataset {
+            lv_dataset: LvDataset {
                 source_path: None,
                 sheets: vec![],
                 all_labels: vec!["alpha".into()],
@@ -216,7 +216,7 @@ mod tests {
 
         let json = std::fs::read_to_string(&path).expect("json read failed");
         assert!(json.contains("\"procrustes\""));
-        assert!(json.contains("\"etv_dataset\""));
+        assert!(json.contains("\"lv_dataset\""));
         assert!(json.contains("\"centrality_mode\""));
 
         let _ = std::fs::remove_file(path);

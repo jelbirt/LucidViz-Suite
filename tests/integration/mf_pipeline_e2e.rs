@@ -383,8 +383,8 @@ fn test_mf_series_pipeline_bridges_to_as_distance_pipeline() {
 
     let result = run_distance_pipeline(&input).expect("distance pipeline failed");
     assert_eq!(result.coordinates.len(), 2);
-    assert_eq!(result.etv_dataset.sheets.len(), 2);
-    assert_eq!(result.etv_dataset.all_labels, series.labels);
+    assert_eq!(result.lv_dataset.sheets.len(), 2);
+    assert_eq!(result.lv_dataset.all_labels, series.labels);
     assert!(matches!(
         &result.centralities[0],
         CentralityState::Unavailable { .. }
@@ -462,12 +462,12 @@ fn test_single_output_and_single_slice_series_produce_same_distance_dataset() {
         run_distance_pipeline(&series_input).expect("series distance pipeline failed");
 
     assert_eq!(
-        single_result.etv_dataset.all_labels,
-        series_result.etv_dataset.all_labels
+        single_result.lv_dataset.all_labels,
+        series_result.lv_dataset.all_labels
     );
-    assert_eq!(single_result.etv_dataset.sheets.len(), 1);
+    assert_eq!(single_result.lv_dataset.sheets.len(), 1);
     assert_eq!(
-        single_result.etv_dataset.sheets,
-        series_result.etv_dataset.sheets
+        single_result.lv_dataset.sheets,
+        series_result.lv_dataset.sheets
     );
 }

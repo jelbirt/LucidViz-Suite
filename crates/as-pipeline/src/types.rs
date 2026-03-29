@@ -2,7 +2,7 @@
 
 use crate::error::AsError;
 pub use lv_data::analysis::CentralityReport;
-use lv_data::schema::EtvDataset;
+use lv_data::schema::LvDataset;
 use ndarray::Array2;
 use serde::{Deserialize, Serialize};
 
@@ -270,5 +270,5 @@ pub struct AsPipelineResult {
     pub centralities: Vec<CentralityState>,
     pub centrality_mode: CentralityMode,
     pub distance_matrices: Vec<DistanceMatrix>,
-    pub etv_dataset: EtvDataset,
+    pub lv_dataset: LvDataset,
 }

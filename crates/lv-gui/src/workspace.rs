@@ -180,7 +180,7 @@ mod tests {
     use super::apply_file_loader_event;
     use crate::panels::FileLoaderEvent;
     use crate::state::{AppState, AsInputSource};
-    use lv_data::schema::EtvDataset;
+    use lv_data::schema::LvDataset;
     use mf_pipeline::types::{MfOutput, MfSeriesOutput};
     use std::path::PathBuf;
 
@@ -213,7 +213,7 @@ mod tests {
         });
 
         let path = PathBuf::from("/tmp/sample.json");
-        let dataset = EtvDataset {
+        let dataset = LvDataset {
             source_path: None,
             sheets: vec![],
             all_labels: vec![],

@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::{validate_dataset, DataError, EtvDataset};
+use crate::{validate_dataset, DataError, LvDataset};
 
 const MAX_JSON_BYTES: u64 = 64 * 1024 * 1024;
 
@@ -8,30 +8,30 @@ const MAX_JSON_BYTES: u64 = 64 * 1024 * 1024;
 // Public API
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Serialise an [`EtvDataset`] to a pretty-printed JSON file.
-pub fn write_etv_json(dataset: &EtvDataset, path: &Path) -> Result<(), DataError> {
+/// Serialise an [`LvDataset`] to a pretty-printed JSON file.
+pub fn write_lv_json(dataset: &LvDataset, path: &Path) -> Result<(), DataError> {
     let json = serde_json::to_string_pretty(dataset)?;
     crate::io_util::atomic_write(path, json.as_bytes())?;
     Ok(())
 }
 
-/// Deserialise an [`EtvDataset`] from a JSON file.
-pub fn read_etv_json(path: &Path) -> Result<EtvDataset, DataError> {
+/// Deserialise an [`LvDataset`] from a JSON file.
+pub fn read_lv_json(path: &Path) -> Result<LvDataset, DataError> {
     let bytes = crate::io_util::read_bounded_file(path, MAX_JSON_BYTES)?;
-    let mut dataset: EtvDataset = serde_json::from_slice(&bytes)?;
+    let mut dataset: LvDataset = serde_json::from_slice(&bytes)?;
     dataset.canonicalize_all_labels();
     validate_dataset(&dataset)?;
     Ok(dataset)
 }
 
-/// Serialise an [`EtvDataset`] to an in-memory JSON byte vector.
-pub fn write_etv_json_bytes(dataset: &EtvDataset) -> Result<Vec<u8>, DataError> {
+/// Serialise an [`LvDataset`] to an in-memory JSON byte vector.
+pub fn write_lv_json_bytes(dataset: &LvDataset) -> Result<Vec<u8>, DataError> {
     let json = serde_json::to_vec_pretty(dataset)?;
     Ok(json)
 }
 
-/// Deserialise an [`EtvDataset`] from an in-memory JSON byte slice.
-pub fn read_etv_json_bytes(bytes: &[u8]) -> Result<EtvDataset, DataError> {
+/// Deserialise an [`LvDataset`] from an in-memory JSON byte slice.
+pub fn read_lv_json_bytes(bytes: &[u8]) -> Result<LvDataset, DataError> {
     if bytes.len() as u64 > MAX_JSON_BYTES {
         return Err(DataError::FileTooLarge {
             path: "<memory>".into(),
@@ -39,7 +39,7 @@ pub fn read_etv_json_bytes(bytes: &[u8]) -> Result<EtvDataset, DataError> {
             limit: MAX_JSON_BYTES,
         });
     }
-    let mut dataset: EtvDataset = serde_json::from_slice(bytes)?;
+    let mut dataset: LvDataset = serde_json::from_slice(bytes)?;
     dataset.canonicalize_all_labels();
     validate_dataset(&dataset)?;
     Ok(dataset)
@@ -52,10 +52,10 @@ pub fn read_etv_json_bytes(bytes: &[u8]) -> Result<EtvDataset, DataError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{EtvDataset, EtvRow, EtvSheet, ShapeKind};
+    use crate::{LvDataset, LvRow, LvSheet, ShapeKind};
 
-    fn minimal_dataset() -> EtvDataset {
-        let row = EtvRow {
+    fn minimal_dataset() -> LvDataset {
+        let row = LvRow {
             label: "NodeA".into(),
             x: 0.5,
             y: -0.5,
@@ -76,9 +76,9 @@ mod tests {
             cluster_value: 3.0,
             beats: 4,
         };
-        EtvDataset {
+        LvDataset {
             source_path: None,
-            sheets: vec![EtvSheet {
+            sheets: vec![LvSheet {
                 name: "T0".into(),
                 sheet_index: 0,
                 rows: vec![row],
@@ -91,8 +91,8 @@ mod tests {
     #[test]
     fn json_roundtrip_bytes() {
         let original = minimal_dataset();
-        let bytes = write_etv_json_bytes(&original).expect("write");
-        let recovered = read_etv_json_bytes(&bytes).expect("read");
+        let bytes = write_lv_json_bytes(&original).expect("write");
+        let recovered = read_lv_json_bytes(&bytes).expect("read");
 
         assert_eq!(recovered.sheets.len(), 1);
         let row = &recovered.sheets[0].rows[0];
@@ -106,7 +106,7 @@ mod tests {
     #[test]
     fn json_output_is_pretty() {
         let ds = minimal_dataset();
-        let bytes = write_etv_json_bytes(&ds).expect("write");
+        let bytes = write_lv_json_bytes(&ds).expect("write");
         let s = std::str::from_utf8(&bytes).expect("utf8");
         // Pretty JSON must contain newlines and indentation
         assert!(s.contains('\n'));
@@ -150,14 +150,14 @@ mod tests {
           "all_labels": ["ghost", "NodeA"]
         }"#;
 
-        let recovered = read_etv_json_bytes(json).expect("read");
+        let recovered = read_lv_json_bytes(json).expect("read");
         assert_eq!(recovered.all_labels, vec!["NodeA"]);
     }
 
     #[test]
     fn json_read_rejects_oversized_memory_input() {
         let bytes = vec![b' '; (MAX_JSON_BYTES + 1) as usize];
-        let err = read_etv_json_bytes(&bytes).expect_err("oversized json should fail");
+        let err = read_lv_json_bytes(&bytes).expect_err("oversized json should fail");
         assert!(matches!(err, DataError::FileTooLarge { .. }));
     }
 }

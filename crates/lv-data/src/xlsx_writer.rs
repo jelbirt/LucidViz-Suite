@@ -2,32 +2,32 @@ use std::path::Path;
 
 use rust_xlsxwriter::{Format, Workbook};
 
-use crate::{DataError, EtvDataset, EtvRow, EtvSheet};
+use crate::{DataError, LvDataset, LvRow, LvSheet};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Public API
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Write an [`EtvDataset`] to an XLSX file at `path`.
-pub fn write_etv_xlsx(dataset: &EtvDataset, path: &Path) -> Result<(), DataError> {
-    let bytes = write_etv_xlsx_bytes(dataset)?;
+/// Write an [`LvDataset`] to an XLSX file at `path`.
+pub fn write_lv_xlsx(dataset: &LvDataset, path: &Path) -> Result<(), DataError> {
+    let bytes = write_lv_xlsx_bytes(dataset)?;
     crate::io_util::atomic_write(path, &bytes)?;
     Ok(())
 }
 
-/// Serialise an [`EtvDataset`] to an in-memory XLSX byte vector.
+/// Serialise an [`LvDataset`] to an in-memory XLSX byte vector.
 ///
 /// This variant is WASM-compatible (no filesystem access required).
-pub fn write_etv_xlsx_bytes(dataset: &EtvDataset) -> Result<Vec<u8>, DataError> {
+pub fn write_lv_xlsx_bytes(dataset: &LvDataset) -> Result<Vec<u8>, DataError> {
     let mut workbook = Workbook::new();
 
     let header_fmt = Format::new().set_bold();
 
-    for etv_sheet in &dataset.sheets {
+    for lv_sheet in &dataset.sheets {
         let ws = workbook.add_worksheet();
-        ws.set_name(&etv_sheet.name).map_err(DataError::XlsxWrite)?;
+        ws.set_name(&lv_sheet.name).map_err(DataError::XlsxWrite)?;
 
-        write_sheet(ws, etv_sheet, &header_fmt)?;
+        write_sheet(ws, lv_sheet, &header_fmt)?;
     }
 
     let bytes = workbook.save_to_buffer().map_err(DataError::XlsxWrite)?;
@@ -64,7 +64,7 @@ const EDGE_HEADERS: &[&str] = &["from", "to", "strength"];
 
 fn write_sheet(
     ws: &mut rust_xlsxwriter::Worksheet,
-    sheet: &EtvSheet,
+    sheet: &LvSheet,
     header_fmt: &Format,
 ) -> Result<(), DataError> {
     // ── Header row ───────────────────────────────────────────────────────────
@@ -75,7 +75,7 @@ fn write_sheet(
 
     // ── Object rows ──────────────────────────────────────────────────────────
     for (i, row) in sheet.rows.iter().enumerate() {
-        write_etv_row(ws, i as u32 + 1, row)?;
+        write_lv_row(ws, i as u32 + 1, row)?;
     }
 
     // ── Edge section ─────────────────────────────────────────────────────────
@@ -101,10 +101,10 @@ fn write_sheet(
     Ok(())
 }
 
-fn write_etv_row(
+fn write_lv_row(
     ws: &mut rust_xlsxwriter::Worksheet,
     row: u32,
-    etv: &EtvRow,
+    lv: &LvRow,
 ) -> Result<(), DataError> {
     macro_rules! w {
         ($col:expr, $val:expr) => {
@@ -112,25 +112,25 @@ fn write_etv_row(
         };
     }
 
-    w!(0, etv.label.as_str());
-    w!(1, etv.x);
-    w!(2, etv.y);
-    w!(3, etv.z);
-    w!(4, etv.size);
-    w!(5, etv.size_alpha);
-    w!(6, etv.spin_x);
-    w!(7, etv.spin_y);
-    w!(8, etv.spin_z);
-    w!(9, etv.shape.to_string().as_str());
-    w!(10, etv.color_r as f64);
-    w!(11, etv.color_g as f64);
-    w!(12, etv.color_b as f64);
-    w!(13, u32::from(etv.note));
-    w!(14, u32::from(etv.instrument));
-    w!(15, u32::from(etv.channel));
-    w!(16, u32::from(etv.velocity));
-    w!(17, etv.cluster_value);
-    w!(18, etv.beats);
+    w!(0, lv.label.as_str());
+    w!(1, lv.x);
+    w!(2, lv.y);
+    w!(3, lv.z);
+    w!(4, lv.size);
+    w!(5, lv.size_alpha);
+    w!(6, lv.spin_x);
+    w!(7, lv.spin_y);
+    w!(8, lv.spin_z);
+    w!(9, lv.shape.to_string().as_str());
+    w!(10, lv.color_r as f64);
+    w!(11, lv.color_g as f64);
+    w!(12, lv.color_b as f64);
+    w!(13, u32::from(lv.note));
+    w!(14, u32::from(lv.instrument));
+    w!(15, u32::from(lv.channel));
+    w!(16, u32::from(lv.velocity));
+    w!(17, lv.cluster_value);
+    w!(18, lv.beats);
 
     Ok(())
 }
@@ -142,11 +142,11 @@ fn write_etv_row(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{EdgeRow, EtvRow, EtvSheet, ShapeKind};
+    use crate::{EdgeRow, LvRow, LvSheet, ShapeKind};
 
-    fn sample_dataset() -> EtvDataset {
+    fn sample_dataset() -> LvDataset {
         let rows = vec![
-            EtvRow {
+            LvRow {
                 label: "Alpha".into(),
                 x: 1.0,
                 y: 2.0,
@@ -167,7 +167,7 @@ mod tests {
                 cluster_value: 1.0,
                 beats: 2,
             },
-            EtvRow {
+            LvRow {
                 label: "Beta".into(),
                 x: -1.0,
                 y: 0.0,
@@ -194,9 +194,9 @@ mod tests {
             to: "Beta".into(),
             strength: 0.75,
         }];
-        EtvDataset {
+        LvDataset {
             source_path: None,
-            sheets: vec![EtvSheet {
+            sheets: vec![LvSheet {
                 name: "Sheet1".into(),
                 sheet_index: 0,
                 rows,
@@ -209,7 +209,7 @@ mod tests {
     #[test]
     fn write_to_bytes_succeeds() {
         let ds = sample_dataset();
-        let bytes = write_etv_xlsx_bytes(&ds).expect("write should succeed");
+        let bytes = write_lv_xlsx_bytes(&ds).expect("write should succeed");
         assert!(!bytes.is_empty());
         // XLSX files start with PK (ZIP magic bytes)
         assert_eq!(&bytes[..2], b"PK");
@@ -217,11 +217,11 @@ mod tests {
 
     #[test]
     fn write_then_read_roundtrip() {
-        use crate::xlsx_reader::read_etv_xlsx_bytes;
+        use crate::xlsx_reader::read_lv_xlsx_bytes;
 
         let original = sample_dataset();
-        let bytes = write_etv_xlsx_bytes(&original).expect("write");
-        let recovered = read_etv_xlsx_bytes(&bytes).expect("read");
+        let bytes = write_lv_xlsx_bytes(&original).expect("write");
+        let recovered = read_lv_xlsx_bytes(&bytes).expect("read");
 
         assert_eq!(recovered.sheets.len(), 1);
         let sheet = &recovered.sheets[0];

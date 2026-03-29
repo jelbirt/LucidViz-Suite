@@ -98,16 +98,16 @@ impl FromStr for ShapeKind {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// EtvRow — one node / time-point row (19 fixed columns)
+// LvRow — one node / time-point row (19 fixed columns)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// A single node row from an ETV XLSX file.
+/// A single node row from an LV XLSX file.
 ///
 /// Column positions (0-indexed) are fixed; column headers in the file are
 /// ignored.  All coordinates are in the normalised visualisation space that
 /// `as-pipeline` outputs.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct EtvRow {
+pub struct LvRow {
     /// Col 0 — non-empty node label, max 255 chars.
     pub label: String,
     /// Col 1-3 — spatial coordinates.
@@ -142,9 +142,9 @@ pub struct EtvRow {
     pub beats: u32,
 }
 
-impl Default for EtvRow {
+impl Default for LvRow {
     fn default() -> Self {
-        EtvRow {
+        LvRow {
             label: String::new(),
             x: 0.0,
             y: 0.0,
@@ -187,42 +187,42 @@ pub struct EdgeRow {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// EtvSheet
+// LvSheet
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// One worksheet from an ETV workbook.
+/// One worksheet from an LV workbook.
 ///
 /// Each sheet represents one *time point* in the LIS animation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct EtvSheet {
+pub struct LvSheet {
     /// Worksheet name as reported by calamine.
     pub name: String,
     /// Zero-based sheet index within the workbook.
     pub sheet_index: usize,
     /// Node rows (object section).
-    pub rows: Vec<EtvRow>,
+    pub rows: Vec<LvRow>,
     /// Edge rows (edge section, may be empty).
     pub edges: Vec<EdgeRow>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// EtvDataset
+// LvDataset
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// The full contents of an ETV workbook — one or more time-point sheets.
+/// The full contents of an LV workbook — one or more time-point sheets.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct EtvDataset {
+pub struct LvDataset {
     /// Original file path, if loaded from disk.
     pub source_path: Option<PathBuf>,
     /// Sheets in workbook order.
-    pub sheets: Vec<EtvSheet>,
+    pub sheets: Vec<LvSheet>,
     /// Deduplicated union of all labels across all sheets, in first-seen order.
     pub all_labels: Vec<String>,
 }
 
-impl EtvDataset {
+impl LvDataset {
     /// Canonical deduplicated union of all row labels across all sheets.
-    pub fn canonical_all_labels_from_sheets(sheets: &[EtvSheet]) -> Vec<String> {
+    pub fn canonical_all_labels_from_sheets(sheets: &[LvSheet]) -> Vec<String> {
         let mut all_labels = Vec::new();
         let mut seen = HashSet::new();
         for sheet in sheets {
@@ -318,11 +318,11 @@ pub struct GpuInstance {
 }
 
 impl GpuInstance {
-    /// Construct a [`GpuInstance`] from an [`EtvRow`] at a given position.
+    /// Construct a [`GpuInstance`] from an [`LvRow`] at a given position.
     ///
     /// `position` is provided separately because it comes from the MDS
     /// pipeline output, not directly from the row.
-    pub fn from_row(row: &EtvRow, position: [f32; 3]) -> Self {
+    pub fn from_row(row: &LvRow, position: [f32; 3]) -> Self {
         GpuInstance {
             position,
             size: row.size as f32,
@@ -348,7 +348,7 @@ pub struct LisFrame {
     pub labels: Vec<String>,
     /// Absolute frame index across the whole animation.
     pub slice_index: u32,
-    /// Index into `EtvDataset::sheets` of the source sheet for this segment.
+    /// Index into `LvDataset::sheets` of the source sheet for this segment.
     pub transition_index: u32,
     /// Frame index within the current sheet-to-sheet segment [0, lis).
     pub local_slice: u32,
@@ -469,16 +469,16 @@ mod tests {
     }
 
     #[test]
-    fn etv_dataset_estimated_buffer_bytes() {
+    fn lv_dataset_estimated_buffer_bytes() {
         // 3 sheets, 10 objects each, LIS=30 → (3-1)*30 = 60 frames
         // 60 * 10 * 64 = 38 400 bytes
-        let sheet = EtvSheet {
+        let sheet = LvSheet {
             name: "t0".into(),
             sheet_index: 0,
-            rows: (0..10).map(|_| EtvRow::default()).collect(),
+            rows: (0..10).map(|_| LvRow::default()).collect(),
             edges: vec![],
         };
-        let dataset = EtvDataset {
+        let dataset = LvDataset {
             source_path: None,
             sheets: vec![sheet.clone(), sheet.clone(), sheet],
             all_labels: (0..10).map(|i| format!("n{i}")).collect(),
@@ -488,33 +488,33 @@ mod tests {
 
     #[test]
     fn canonical_all_labels_uses_first_seen_row_order() {
-        let dataset = EtvDataset {
+        let dataset = LvDataset {
             source_path: None,
             sheets: vec![
-                EtvSheet {
+                LvSheet {
                     name: "t0".into(),
                     sheet_index: 0,
                     rows: vec![
-                        EtvRow {
+                        LvRow {
                             label: "beta".into(),
                             ..Default::default()
                         },
-                        EtvRow {
+                        LvRow {
                             label: "alpha".into(),
                             ..Default::default()
                         },
                     ],
                     edges: vec![],
                 },
-                EtvSheet {
+                LvSheet {
                     name: "t1".into(),
                     sheet_index: 1,
                     rows: vec![
-                        EtvRow {
+                        LvRow {
                             label: "alpha".into(),
                             ..Default::default()
                         },
-                        EtvRow {
+                        LvRow {
                             label: "gamma".into(),
                             ..Default::default()
                         },

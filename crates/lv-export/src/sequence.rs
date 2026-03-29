@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 
 use anyhow::{bail, Context as _, Result};
-use lv_data::{EtvDataset, LisBuffer, LisConfig, LisFrame};
+use lv_data::{LisBuffer, LisConfig, LisFrame, LvDataset};
 use lv_renderer::{compute_frame, ArcballCamera, WgpuContext};
 
 use crate::snapshot::SnapshotRenderer;
@@ -52,7 +52,7 @@ pub struct SequenceControl<'a> {
 /// Errors are returned immediately; partial output may exist on disk.
 pub fn capture_sequence(
     ctx: &WgpuContext,
-    dataset: &EtvDataset,
+    dataset: &LvDataset,
     lis_config: &LisConfig,
     buffer: &LisBuffer,
     camera: &ArcballCamera,
@@ -75,7 +75,7 @@ pub fn capture_sequence(
 
 pub fn capture_sequence_with_control(
     ctx: &WgpuContext,
-    dataset: &EtvDataset,
+    dataset: &LvDataset,
     lis_config: &LisConfig,
     buffer: &LisBuffer,
     camera: &ArcballCamera,
@@ -129,7 +129,7 @@ pub fn capture_sequence_with_control(
 }
 
 pub(crate) fn export_frame(
-    dataset: &EtvDataset,
+    dataset: &LvDataset,
     lis_config: &LisConfig,
     buffer: &LisBuffer,
     frame_idx: u32,
@@ -157,19 +157,19 @@ mod tests {
     use super::{
         capture_sequence_with_control, export_frame, ImageFormat, SequenceConfig, SequenceControl,
     };
-    use lv_data::{EtvDataset, EtvRow, EtvSheet, LisBuffer, LisConfig, ShapeKind};
+    use lv_data::{LisBuffer, LisConfig, LvDataset, LvRow, LvSheet, ShapeKind};
     use lv_renderer::{build_lis_buffer, compute_frame};
     use std::sync::atomic::AtomicBool;
     use std::sync::mpsc;
 
-    fn sample_dataset() -> EtvDataset {
-        EtvDataset {
+    fn sample_dataset() -> LvDataset {
+        LvDataset {
             source_path: None,
             sheets: vec![
-                EtvSheet {
+                LvSheet {
                     name: "T0".into(),
                     sheet_index: 0,
-                    rows: vec![EtvRow {
+                    rows: vec![LvRow {
                         label: "alpha".into(),
                         shape: ShapeKind::Sphere,
                         x: 0.0,
@@ -179,10 +179,10 @@ mod tests {
                     }],
                     edges: vec![],
                 },
-                EtvSheet {
+                LvSheet {
                     name: "T1".into(),
                     sheet_index: 1,
-                    rows: vec![EtvRow {
+                    rows: vec![LvRow {
                         label: "alpha".into(),
                         shape: ShapeKind::Sphere,
                         x: 10.0,

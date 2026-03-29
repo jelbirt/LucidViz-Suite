@@ -3,7 +3,7 @@
 //! `EgoClusterState` drives per-frame object visibility and edge generation
 //! for the Lucid Visualization Suite's ego-cluster highlighting feature.
 
-use lv_data::{EdgeRow, EtvSheet};
+use lv_data::{EdgeRow, LvSheet};
 use lv_gui::EgoEdgeDirection;
 use lv_renderer::GpuEdge;
 use std::collections::{HashMap, HashSet};
@@ -63,7 +63,7 @@ fn neighbor_for_direction(
 }
 
 fn directional_neighbors(
-    sheet: &EtvSheet,
+    sheet: &LvSheet,
     selected: &str,
     direction: EgoEdgeDirection,
     filtered: &HashSet<String>,
@@ -89,7 +89,7 @@ fn directional_neighbors(
 ///   - If `show_secondary`: also show members of each neighbour.
 /// - `shared_objects_only`: intersect the ego-cluster with nodes that appear
 ///   in ≥2 distinct other nodes' ego clusters (within the filtered set).
-pub fn compute_visible_objects(sheet: &EtvSheet, state: &EgoClusterState) -> HashSet<String> {
+pub fn compute_visible_objects(sheet: &LvSheet, state: &EgoClusterState) -> HashSet<String> {
     // Build full cluster-filtered label set
     let filtered: HashSet<String> = sheet
         .rows
@@ -165,7 +165,7 @@ pub fn compute_visible_objects(sheet: &EtvSheet, state: &EgoClusterState) -> Has
 /// - Primary edges: selected → direct member (white).
 /// - Secondary edges (if `show_secondary`): member → their neighbours (grey).
 pub fn compute_ego_edges(
-    sheet: &EtvSheet,
+    sheet: &LvSheet,
     selected: &str,
     show_secondary: bool,
     direction: EgoEdgeDirection,
@@ -244,9 +244,9 @@ pub fn build_gpu_edges(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lv_data::{EdgeRow, EtvRow, EtvSheet};
+    use lv_data::{EdgeRow, LvRow, LvSheet};
 
-    fn make_sheet(edges: Vec<(&str, &str)>) -> EtvSheet {
+    fn make_sheet(edges: Vec<(&str, &str)>) -> LvSheet {
         // Collect all unique labels
         let mut labels: Vec<String> = Vec::new();
         for (a, b) in &edges {
@@ -257,12 +257,12 @@ mod tests {
                 labels.push(b.to_string());
             }
         }
-        let rows: Vec<EtvRow> = labels
+        let rows: Vec<LvRow> = labels
             .iter()
-            .map(|l| EtvRow {
+            .map(|l| LvRow {
                 label: l.clone(),
                 cluster_value: 1.0,
-                ..EtvRow::default()
+                ..LvRow::default()
             })
             .collect();
         let edge_rows = edges
@@ -273,7 +273,7 @@ mod tests {
                 strength: 1.0,
             })
             .collect();
-        EtvSheet {
+        LvSheet {
             name: "test".to_string(),
             sheet_index: 0,
             rows,

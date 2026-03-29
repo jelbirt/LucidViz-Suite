@@ -1,11 +1,11 @@
 //! LIS (Lucid Interpolation System) buffer builder.
 //!
-//! Converts an `EtvDataset` into a `LisBuffer` of pre-computed `LisFrame`s, or
+//! Converts an `LvDataset` into a `LisBuffer` of pre-computed `LisFrame`s, or
 //! marks the buffer as streaming if the estimated size exceeds 100 MB.
 
 use std::collections::HashMap;
 
-use lv_data::{EtvDataset, EtvRow, EtvSheet, GpuInstance, LisBuffer, LisConfig, LisFrame};
+use lv_data::{GpuInstance, LisBuffer, LisConfig, LisFrame, LvDataset, LvRow, LvSheet};
 
 const STREAM_THRESHOLD_BYTES: usize = 100 * 1024 * 1024; // 100 MB
 
@@ -14,7 +14,7 @@ const STREAM_THRESHOLD_BYTES: usize = 100 * 1024 * 1024; // 100 MB
 /// If the estimated byte count exceeds `STREAM_THRESHOLD_BYTES` the buffer will
 /// have `streaming = true` and an empty `frames` vec; callers should use
 /// `compute_frame` instead.
-pub fn build_lis_buffer(dataset: &EtvDataset, config: &LisConfig) -> LisBuffer {
+pub fn build_lis_buffer(dataset: &LvDataset, config: &LisConfig) -> LisBuffer {
     let lis = config.lis_value;
     let estimated = dataset.estimated_lis_buffer_bytes(lis);
 
@@ -44,7 +44,7 @@ pub fn build_lis_buffer(dataset: &EtvDataset, config: &LisConfig) -> LisBuffer {
         };
     }
 
-    let indexed_sheets: Vec<HashMap<&str, &EtvRow>> =
+    let indexed_sheets: Vec<HashMap<&str, &LvRow>> =
         dataset.sheets.iter().map(index_sheet_rows).collect();
     let mut frames: Vec<LisFrame> = Vec::new();
     let transitions = if time_pts > 1 { time_pts - 1 } else { 1 };
@@ -81,7 +81,7 @@ pub fn build_lis_buffer(dataset: &EtvDataset, config: &LisConfig) -> LisBuffer {
 }
 
 /// Compute a single `LisFrame` on-demand (used in streaming mode).
-pub fn compute_frame(dataset: &EtvDataset, config: &LisConfig, slice_index: u32) -> LisFrame {
+pub fn compute_frame(dataset: &LvDataset, config: &LisConfig, slice_index: u32) -> LisFrame {
     let lis = config.lis_value;
     let time_pts = dataset.time_points();
     let transitions = if time_pts > 1 {
@@ -113,7 +113,7 @@ pub fn compute_frame(dataset: &EtvDataset, config: &LisConfig, slice_index: u32)
     )
 }
 
-fn index_sheet_rows(sheet: &EtvSheet) -> HashMap<&str, &EtvRow> {
+fn index_sheet_rows(sheet: &LvSheet) -> HashMap<&str, &LvRow> {
     sheet
         .rows
         .iter()
@@ -122,9 +122,9 @@ fn index_sheet_rows(sheet: &EtvSheet) -> HashMap<&str, &EtvRow> {
 }
 
 fn build_frame(
-    dataset: &EtvDataset,
-    rows_a: &HashMap<&str, &EtvRow>,
-    rows_b: &HashMap<&str, &EtvRow>,
+    dataset: &LvDataset,
+    rows_a: &HashMap<&str, &LvRow>,
+    rows_b: &HashMap<&str, &LvRow>,
     alpha: f64,
     slice_index: u32,
     transition_index: u32,
@@ -157,8 +157,8 @@ fn build_frame(
 ///
 /// Missing rows are treated as fade-in (size=0 at the missing end).
 fn interpolate(
-    row_a: Option<&EtvRow>,
-    row_b: Option<&EtvRow>,
+    row_a: Option<&LvRow>,
+    row_b: Option<&LvRow>,
     alpha: f64,
     _label: &str,
 ) -> Option<GpuInstance> {
@@ -221,20 +221,20 @@ impl GpuInstanceExt for GpuInstance {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lv_data::{EtvDataset, EtvRow, EtvSheet, ShapeKind};
+    use lv_data::{LvDataset, LvRow, LvSheet, ShapeKind};
 
-    fn make_dataset() -> EtvDataset {
-        let sheet = EtvSheet {
+    fn make_dataset() -> LvDataset {
+        let sheet = LvSheet {
             name: "T0".into(),
             sheet_index: 0,
             rows: vec![
-                EtvRow {
+                LvRow {
                     label: "cube".into(),
                     shape: ShapeKind::Cube,
                     x: 4.0,
                     ..Default::default()
                 },
-                EtvRow {
+                LvRow {
                     label: "sphere".into(),
                     shape: ShapeKind::Sphere,
                     x: 1.0,
@@ -244,7 +244,7 @@ mod tests {
             edges: vec![],
         };
 
-        EtvDataset {
+        LvDataset {
             source_path: None,
             sheets: vec![sheet],
             all_labels: vec!["cube".into(), "sphere".into()],
@@ -285,11 +285,11 @@ mod tests {
         assert_eq!(frame.instances.len(), frame.labels.len());
     }
 
-    fn make_two_sheet_dataset() -> EtvDataset {
-        let sheet_a = EtvSheet {
+    fn make_two_sheet_dataset() -> LvDataset {
+        let sheet_a = LvSheet {
             name: "T0".into(),
             sheet_index: 0,
-            rows: vec![EtvRow {
+            rows: vec![LvRow {
                 label: "node".into(),
                 shape: ShapeKind::Sphere,
                 x: 0.0,
@@ -300,10 +300,10 @@ mod tests {
             }],
             edges: vec![],
         };
-        let sheet_b = EtvSheet {
+        let sheet_b = LvSheet {
             name: "T1".into(),
             sheet_index: 1,
-            rows: vec![EtvRow {
+            rows: vec![LvRow {
                 label: "node".into(),
                 shape: ShapeKind::Sphere,
                 x: 10.0,
@@ -314,7 +314,7 @@ mod tests {
             }],
             edges: vec![],
         };
-        EtvDataset {
+        LvDataset {
             source_path: None,
             sheets: vec![sheet_a, sheet_b],
             all_labels: vec!["node".into()],
@@ -368,16 +368,16 @@ mod tests {
     #[test]
     fn fade_in_interpolation_starts_at_zero_size() {
         // Node exists only in sheet B, so at alpha=0 it should fade in from size=0
-        let sheet_a = EtvSheet {
+        let sheet_a = LvSheet {
             name: "T0".into(),
             sheet_index: 0,
             rows: vec![],
             edges: vec![],
         };
-        let sheet_b = EtvSheet {
+        let sheet_b = LvSheet {
             name: "T1".into(),
             sheet_index: 1,
-            rows: vec![EtvRow {
+            rows: vec![LvRow {
                 label: "appearing".into(),
                 shape: ShapeKind::Cube,
                 x: 5.0,
@@ -388,7 +388,7 @@ mod tests {
             }],
             edges: vec![],
         };
-        let ds = EtvDataset {
+        let ds = LvDataset {
             source_path: None,
             sheets: vec![sheet_a, sheet_b],
             all_labels: vec!["appearing".into()],

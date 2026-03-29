@@ -112,10 +112,10 @@ fn test_as_pipeline_e2e_single_timestep() {
         }
     }
 
-    // ETV dataset has one sheet with n rows.
-    let etv = &result.etv_dataset;
-    assert_eq!(etv.sheets.len(), 1);
-    assert_eq!(etv.sheets[0].rows.len(), n);
+    // LV dataset has one sheet with n rows.
+    let lv = &result.lv_dataset;
+    assert_eq!(lv.sheets.len(), 1);
+    assert_eq!(lv.sheets[0].rows.len(), n);
 }
 
 #[test]
@@ -233,7 +233,7 @@ fn test_as_pipeline_3d_export_preserves_z_coordinates() {
 
     let result = run_pipeline(&input).expect("3d pipeline failed");
     let coords = &result.coordinates[0];
-    let rows = &result.etv_dataset.sheets[0].rows;
+    let rows = &result.lv_dataset.sheets[0].rows;
 
     assert_eq!(coords.dims, 3);
     assert_eq!(rows.len(), coords.n);
@@ -314,7 +314,7 @@ fn test_as_pipeline_time_series_anchored_uses_first_slice_as_reference() {
 }
 
 #[test]
-fn test_as_pipeline_preserves_directed_edges_in_etv_output() {
+fn test_as_pipeline_preserves_directed_edges_in_lv_output() {
     let labels = vec!["a".to_string(), "b".to_string(), "c".to_string()];
     let adj = Array2::from_shape_vec((3, 3), vec![0.0, 1.0, 0.0, 0.0, 0.0, 0.5, 0.25, 0.0, 0.0])
         .expect("adj shape");
@@ -333,7 +333,7 @@ fn test_as_pipeline_preserves_directed_edges_in_etv_output() {
     })
     .expect("directed pipeline failed");
 
-    let edges = &result.etv_dataset.sheets[0].edges;
+    let edges = &result.lv_dataset.sheets[0].edges;
     assert_eq!(edges.len(), 3);
     assert_eq!(edges[0].from, "a");
     assert_eq!(edges[0].to, "b");

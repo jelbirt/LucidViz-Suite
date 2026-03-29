@@ -3,7 +3,7 @@
 use anyhow::{bail, Result};
 use ndarray::Array2;
 
-use lv_data::schema::EtvDataset;
+use lv_data::schema::LvDataset;
 use lv_data::SimToDistMethod;
 
 use crate::centrality::compute_centrality;
@@ -27,7 +27,7 @@ const INFO_DISTANCE_CAP: f64 = 1_000_000.0;
 ///    c. Compute centrality
 /// 2. Procrustes alignment (if requested)
 /// 3. Normalize coordinates (if requested)
-/// 4. Build `EtvDataset` from final coordinates
+/// 4. Build `LvDataset` from final coordinates
 pub fn run_pipeline(input: &AsPipelineInput) -> Result<AsPipelineResult> {
     if input.datasets.is_empty() {
         bail!("AsPipelineInput has no datasets");
@@ -69,8 +69,8 @@ pub fn run_pipeline(input: &AsPipelineInput) -> Result<AsPipelineResult> {
         );
     }
 
-    // Build a minimal EtvDataset from the last time step's coordinates.
-    let etv_dataset = build_etv_dataset(&coordinates, &input.datasets);
+    // Build a minimal LvDataset from the last time step's coordinates.
+    let lv_dataset = build_lv_dataset(&coordinates, &input.datasets);
 
     Ok(AsPipelineResult {
         coordinates,
@@ -78,7 +78,7 @@ pub fn run_pipeline(input: &AsPipelineInput) -> Result<AsPipelineResult> {
         centralities,
         centrality_mode: input.centrality_mode,
         distance_matrices,
-        etv_dataset,
+        lv_dataset,
     })
 }
 
@@ -125,7 +125,7 @@ pub fn run_distance_pipeline(input: &AsDistancePipelineInput) -> Result<AsPipeli
         .iter()
         .map(|(name, se)| (name.clone(), Array2::<f64>::zeros((se.n, se.n))))
         .collect();
-    let etv_dataset = build_etv_dataset(&coordinates, &dataset_names);
+    let lv_dataset = build_lv_dataset(&coordinates, &dataset_names);
 
     Ok(AsPipelineResult {
         coordinates,
@@ -133,7 +133,7 @@ pub fn run_distance_pipeline(input: &AsDistancePipelineInput) -> Result<AsPipeli
         centralities,
         centrality_mode: input.centrality_mode,
         distance_matrices,
-        etv_dataset,
+        lv_dataset,
     })
 }
 
@@ -399,14 +399,14 @@ fn choose_optimal_reference(
     }
 }
 
-fn build_etv_dataset(
+fn build_lv_dataset(
     coordinates: &[MdsCoordinates],
     datasets: &[(String, Array2<f64>)],
-) -> EtvDataset {
-    use lv_data::schema::{EtvRow, EtvSheet, ShapeKind};
+) -> LvDataset {
+    use lv_data::schema::{LvRow, LvSheet, ShapeKind};
 
     if coordinates.is_empty() {
-        return EtvDataset {
+        return LvDataset {
             source_path: None,
             sheets: vec![],
             all_labels: vec![],
@@ -417,7 +417,7 @@ fn build_etv_dataset(
     // directed edges exactly as they appear in the adjacency matrix.
     // Distance-backed inputs pass zero-adjacency placeholders, so they export
     // coordinate-only sheets with no edges.
-    let sheets: Vec<EtvSheet> = coordinates
+    let sheets: Vec<LvSheet> = coordinates
         .iter()
         .enumerate()
         .map(|(step_idx, coords)| {
@@ -426,7 +426,7 @@ fn build_etv_dataset(
                 .map(|(n, _)| n.clone())
                 .unwrap_or_else(|| format!("Step_{}", step_idx + 1));
 
-            let rows: Vec<EtvRow> = coords
+            let rows: Vec<LvRow> = coords
                 .labels
                 .iter()
                 .enumerate()
@@ -446,7 +446,7 @@ fn build_etv_dataset(
                     } else {
                         0.0
                     };
-                    EtvRow {
+                    LvRow {
                         label: label.clone(),
                         shape: ShapeKind::Sphere,
                         x,
@@ -462,7 +462,7 @@ fn build_etv_dataset(
                 .map(|(_, adj)| adjacency_to_edges(&coords.labels, adj))
                 .unwrap_or_default();
 
-            EtvSheet {
+            LvSheet {
                 name,
                 sheet_index: step_idx,
                 rows,
@@ -471,9 +471,9 @@ fn build_etv_dataset(
         })
         .collect();
 
-    EtvDataset {
+    LvDataset {
         source_path: None,
-        all_labels: EtvDataset::canonical_all_labels_from_sheets(&sheets),
+        all_labels: LvDataset::canonical_all_labels_from_sheets(&sheets),
         sheets,
     }
 }
@@ -504,7 +504,7 @@ fn adjacency_to_edges(labels: &[String], adj: &Array2<f64>) -> Vec<lv_data::sche
 #[cfg(test)]
 mod tests {
     use super::{
-        align_coordinates, build_etv_dataset, mf_output_to_distance_matrix, run_distance_pipeline,
+        align_coordinates, build_lv_dataset, mf_output_to_distance_matrix, run_distance_pipeline,
         unavailable_centrality_state,
     };
     use crate::types::{
@@ -513,7 +513,7 @@ mod tests {
     use ndarray::array;
 
     #[test]
-    fn build_etv_dataset_preserves_z_and_adjacency_edges() {
+    fn build_lv_dataset_preserves_z_and_adjacency_edges() {
         let coords = MdsCoordinates::new(
             vec!["alpha".into(), "beta".into()],
             vec![1.0, 2.0, 3.0, -1.0, -2.0, -3.0],
@@ -524,22 +524,22 @@ mod tests {
         .expect("test coordinates should build");
         let datasets = vec![("T1".to_string(), array![[0.0, 0.75], [0.75, 0.0]])];
 
-        let etv = build_etv_dataset(&[coords], &datasets);
+        let lv = build_lv_dataset(&[coords], &datasets);
 
-        assert_eq!(etv.sheets.len(), 1);
-        assert_eq!(etv.sheets[0].rows[0].z, 3.0);
-        assert_eq!(etv.sheets[0].rows[1].z, -3.0);
-        assert_eq!(etv.sheets[0].edges.len(), 2);
-        assert_eq!(etv.sheets[0].edges[0].from, "alpha");
-        assert_eq!(etv.sheets[0].edges[0].to, "beta");
-        assert!((etv.sheets[0].edges[0].strength - 0.75).abs() < 1e-12);
-        assert_eq!(etv.sheets[0].edges[1].from, "beta");
-        assert_eq!(etv.sheets[0].edges[1].to, "alpha");
-        assert!((etv.sheets[0].edges[1].strength - 0.75).abs() < 1e-12);
+        assert_eq!(lv.sheets.len(), 1);
+        assert_eq!(lv.sheets[0].rows[0].z, 3.0);
+        assert_eq!(lv.sheets[0].rows[1].z, -3.0);
+        assert_eq!(lv.sheets[0].edges.len(), 2);
+        assert_eq!(lv.sheets[0].edges[0].from, "alpha");
+        assert_eq!(lv.sheets[0].edges[0].to, "beta");
+        assert!((lv.sheets[0].edges[0].strength - 0.75).abs() < 1e-12);
+        assert_eq!(lv.sheets[0].edges[1].from, "beta");
+        assert_eq!(lv.sheets[0].edges[1].to, "alpha");
+        assert!((lv.sheets[0].edges[1].strength - 0.75).abs() < 1e-12);
     }
 
     #[test]
-    fn build_etv_dataset_preserves_directed_edges() {
+    fn build_lv_dataset_preserves_directed_edges() {
         let coords = MdsCoordinates::new(
             vec!["alpha".into(), "beta".into()],
             vec![1.0, 2.0, -1.0, -2.0],
@@ -550,16 +550,16 @@ mod tests {
         .expect("test coordinates should build");
         let datasets = vec![("T1".to_string(), array![[0.0, 0.75], [0.0, 0.0]])];
 
-        let etv = build_etv_dataset(&[coords], &datasets);
+        let lv = build_lv_dataset(&[coords], &datasets);
 
-        assert_eq!(etv.sheets[0].edges.len(), 1);
-        assert_eq!(etv.sheets[0].edges[0].from, "alpha");
-        assert_eq!(etv.sheets[0].edges[0].to, "beta");
-        assert!((etv.sheets[0].edges[0].strength - 0.75).abs() < 1e-12);
+        assert_eq!(lv.sheets[0].edges.len(), 1);
+        assert_eq!(lv.sheets[0].edges[0].from, "alpha");
+        assert_eq!(lv.sheets[0].edges[0].to, "beta");
+        assert!((lv.sheets[0].edges[0].strength - 0.75).abs() < 1e-12);
     }
 
     #[test]
-    fn build_etv_dataset_exports_reciprocal_edges_separately() {
+    fn build_lv_dataset_exports_reciprocal_edges_separately() {
         let coords = MdsCoordinates::new(
             vec!["alpha".into(), "beta".into()],
             vec![1.0, 2.0, -1.0, -2.0],
@@ -570,13 +570,13 @@ mod tests {
         .expect("test coordinates should build");
         let datasets = vec![("T1".to_string(), array![[0.0, 0.75], [0.5, 0.0]])];
 
-        let etv = build_etv_dataset(&[coords], &datasets);
+        let lv = build_lv_dataset(&[coords], &datasets);
 
-        assert_eq!(etv.sheets[0].edges.len(), 2);
-        assert_eq!(etv.sheets[0].edges[0].from, "alpha");
-        assert_eq!(etv.sheets[0].edges[0].to, "beta");
-        assert_eq!(etv.sheets[0].edges[1].from, "beta");
-        assert_eq!(etv.sheets[0].edges[1].to, "alpha");
+        assert_eq!(lv.sheets[0].edges.len(), 2);
+        assert_eq!(lv.sheets[0].edges[0].from, "alpha");
+        assert_eq!(lv.sheets[0].edges[0].to, "beta");
+        assert_eq!(lv.sheets[0].edges[1].from, "beta");
+        assert_eq!(lv.sheets[0].edges[1].to, "alpha");
     }
 
     #[test]

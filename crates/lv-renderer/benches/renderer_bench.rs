@@ -1,5 +1,5 @@
 use criterion::{criterion_group, criterion_main, Criterion};
-use lv_data::{EtvDataset, EtvRow, EtvSheet, LisConfig, ShapeKind};
+use lv_data::{LisConfig, LvDataset, LvRow, LvSheet, ShapeKind};
 use lv_renderer::lis::{build_lis_buffer, compute_frame};
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
@@ -7,12 +7,12 @@ use std::hint::black_box;
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 
-fn fake_dataset(n_objects: usize, n_sheets: usize) -> EtvDataset {
+fn fake_dataset(n_objects: usize, n_sheets: usize) -> LvDataset {
     let mut rng = SmallRng::seed_from_u64(3);
-    let sheets: Vec<EtvSheet> = (0..n_sheets)
+    let sheets: Vec<LvSheet> = (0..n_sheets)
         .map(|si| {
-            let rows: Vec<EtvRow> = (0..n_objects)
-                .map(|i| EtvRow {
+            let rows: Vec<LvRow> = (0..n_objects)
+                .map(|i| LvRow {
                     label: format!("obj_{i}"),
                     x: rng.random_range(-1.0..1.0),
                     y: rng.random_range(-1.0..1.0),
@@ -34,7 +34,7 @@ fn fake_dataset(n_objects: usize, n_sheets: usize) -> EtvDataset {
                     beats: 1,
                 })
                 .collect();
-            EtvSheet {
+            LvSheet {
                 name: format!("Sheet{si}"),
                 sheet_index: si,
                 rows,
@@ -42,7 +42,7 @@ fn fake_dataset(n_objects: usize, n_sheets: usize) -> EtvDataset {
             }
         })
         .collect();
-    EtvDataset {
+    LvDataset {
         source_path: None,
         sheets,
         all_labels: (0..n_objects).map(|i| format!("obj_{i}")).collect(),

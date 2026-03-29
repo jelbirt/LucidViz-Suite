@@ -16,15 +16,15 @@ pub use snapshot::{capture_frame, SnapshotRenderer};
 #[cfg(test)]
 mod tests {
     use crate::sequence::export_frame;
-    use lv_data::{EtvDataset, EtvRow, EtvSheet, LisBuffer, LisConfig, ShapeKind};
+    use lv_data::{LisBuffer, LisConfig, LvDataset, LvRow, LvSheet, ShapeKind};
 
-    fn dataset() -> EtvDataset {
-        EtvDataset {
+    fn dataset() -> LvDataset {
+        LvDataset {
             source_path: None,
-            sheets: vec![EtvSheet {
+            sheets: vec![LvSheet {
                 name: "T0".into(),
                 sheet_index: 0,
-                rows: vec![EtvRow {
+                rows: vec![LvRow {
                     label: "alpha".into(),
                     shape: ShapeKind::Sphere,
                     ..Default::default()

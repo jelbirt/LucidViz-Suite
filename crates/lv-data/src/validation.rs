@@ -1,4 +1,4 @@
-use crate::{DataError, EdgeRow, EtvDataset, EtvRow, EtvSheet};
+use crate::{DataError, EdgeRow, LvDataset, LvRow, LvSheet};
 
 /// A single validation failure with its location.
 #[derive(Debug, Clone)]
@@ -19,9 +19,9 @@ impl std::fmt::Display for ValidationFailure {
 // Row-level validation
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Validate a single [`EtvRow`].  Returns a list of failure messages
+/// Validate a single [`LvRow`].  Returns a list of failure messages
 /// (empty = valid).
-pub fn validate_row(row: &EtvRow) -> Vec<String> {
+pub fn validate_row(row: &LvRow) -> Vec<String> {
     let mut errs: Vec<String> = Vec::new();
 
     if row.label.is_empty() {
@@ -128,8 +128,8 @@ pub fn validate_edge(
 // Sheet-level validation
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Validate all rows and edges in a single [`EtvSheet`].
-pub fn validate_sheet(sheet: &EtvSheet) -> Vec<ValidationFailure> {
+/// Validate all rows and edges in a single [`LvSheet`].
+pub fn validate_sheet(sheet: &LvSheet) -> Vec<ValidationFailure> {
     let mut failures = Vec::new();
 
     let label_set: std::collections::HashSet<&str> =
@@ -162,11 +162,11 @@ pub fn validate_sheet(sheet: &EtvSheet) -> Vec<ValidationFailure> {
 // Dataset-level validation
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Validate an entire [`EtvDataset`].
+/// Validate an entire [`LvDataset`].
 ///
 /// Returns `Ok(())` if all rows and edges are valid, or a [`DataError::Validation`]
 /// aggregating every failure.
-pub fn validate_dataset(dataset: &EtvDataset) -> Result<(), DataError> {
+pub fn validate_dataset(dataset: &LvDataset) -> Result<(), DataError> {
     let mut all_failures: Vec<ValidationFailure> = Vec::new();
 
     let canonical_labels = dataset.canonical_all_labels();
@@ -207,10 +207,10 @@ pub fn validate_dataset(dataset: &EtvDataset) -> Result<(), DataError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::{EtvRow, ShapeKind};
+    use crate::schema::{LvRow, ShapeKind};
 
-    fn valid_row() -> EtvRow {
-        EtvRow {
+    fn valid_row() -> LvRow {
+        LvRow {
             label: "TestNode".into(),
             x: 1.0,
             y: -2.0,
@@ -368,13 +368,13 @@ mod tests {
         let mut row = valid_row();
         row.label = String::new(); // invalid
         row.size = 0.0; // also invalid
-        let sheet = EtvSheet {
+        let sheet = LvSheet {
             name: "Sheet1".into(),
             sheet_index: 0,
             rows: vec![row],
             edges: vec![],
         };
-        let dataset = EtvDataset {
+        let dataset = LvDataset {
             source_path: None,
             sheets: vec![sheet],
             all_labels: vec![],
@@ -410,9 +410,9 @@ mod tests {
 
     #[test]
     fn dataset_validation_rejects_stale_all_labels() {
-        let dataset = EtvDataset {
+        let dataset = LvDataset {
             source_path: None,
-            sheets: vec![EtvSheet {
+            sheets: vec![LvSheet {
                 name: "Sheet1".into(),
                 sheet_index: 0,
                 rows: vec![valid_row()],

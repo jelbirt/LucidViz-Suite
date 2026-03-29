@@ -18,10 +18,10 @@ pub use analysis::CentralityReport;
 pub use bridge::SimToDistMethod;
 pub use error::DataError;
 #[cfg(feature = "native-io")]
-pub use json_io::{read_etv_json as load_dataset_json, write_etv_json};
+pub use json_io::{read_lv_json as load_dataset_json, write_lv_json};
 pub use schema::{
-    EdgeRow, EtvDataset, EtvRow, EtvSheet, GpuInstance, LisBuffer, LisConfig, LisFrame, ShapeKind,
+    EdgeRow, GpuInstance, LisBuffer, LisConfig, LisFrame, LvDataset, LvRow, LvSheet, ShapeKind,
 };
 pub use validation::validate_dataset;
 #[cfg(feature = "native-io")]
-pub use xlsx_reader::read_etv_xlsx;
+pub use xlsx_reader::read_lv_xlsx;

@@ -26,7 +26,7 @@ const MAX_SESSION_BYTES: u64 = 16 * 1024 * 1024;
 pub struct SessionSnapshot {
     /// Human-readable name for this session.
     pub name: String,
-    /// Path to the source `.etv.xlsx` file (if any).
+    /// Path to the source `.lv.xlsx` file (if any).
     pub source_path: Option<PathBuf>,
     /// LIS (animation) configuration.
     pub lis_config: LisConfigSnapshot,

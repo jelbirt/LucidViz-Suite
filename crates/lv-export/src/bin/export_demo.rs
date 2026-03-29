@@ -9,14 +9,14 @@
 use std::sync::mpsc;
 
 use anyhow::{Context as _, Result};
-use lv_data::{EtvDataset, EtvRow, EtvSheet, LisConfig, ShapeKind};
+use lv_data::{LisConfig, LvDataset, LvRow, LvSheet, ShapeKind};
 use lv_export::{capture_sequence, ImageFormat, SequenceConfig};
 use lv_renderer::lis::build_lis_buffer;
 use lv_renderer::{ArcballCamera, WgpuContext};
 
 // ── dataset ───────────────────────────────────────────────────────────────────
 
-fn make_demo_dataset() -> EtvDataset {
+fn make_demo_dataset() -> LvDataset {
     // (label, region, gdp_tier 0-4, base_x, base_y, base_z, spin_y deg/frame)
     #[allow(clippy::type_complexity)]
     let nodes: &[(&str, usize, u32, f64, f64, f64, f64)] = &[
@@ -156,11 +156,11 @@ fn make_demo_dataset() -> EtvDataset {
     let num_sheets: usize = 8;
     let all_labels: Vec<String> = nodes.iter().map(|(l, ..)| l.to_string()).collect();
 
-    let sheets: Vec<EtvSheet> = (0..num_sheets)
+    let sheets: Vec<LvSheet> = (0..num_sheets)
         .map(|s| {
             let year_offset = s as f64;
 
-            let rows: Vec<EtvRow> = nodes
+            let rows: Vec<LvRow> = nodes
                 .iter()
                 .map(|(label, region, gdp_tier, bx, by, bz, spin_y)| {
                     let (dx, dy, dz) = drift.get(label).copied().unwrap_or((0.0, 0.0, 0.0));
@@ -186,7 +186,7 @@ fn make_demo_dataset() -> EtvDataset {
                         * 2.0;
 
                     let (cr, cg, cb) = region_color[*region];
-                    EtvRow {
+                    LvRow {
                         label: label.to_string(),
                         x: bx + dx * year_offset + nx,
                         y: by + dy * year_offset + ny,
@@ -198,7 +198,7 @@ fn make_demo_dataset() -> EtvDataset {
                         color_b: cb,
                         cluster_value: *gdp_tier as f64,
                         spin_y: *spin_y,
-                        ..EtvRow::default()
+                        ..LvRow::default()
                     }
                 })
                 .collect();
@@ -219,7 +219,7 @@ fn make_demo_dataset() -> EtvDataset {
                 })
                 .collect();
 
-            EtvSheet {
+            LvSheet {
                 name: format!("{}", 2017 + s),
                 sheet_index: s,
                 rows,
@@ -228,7 +228,7 @@ fn make_demo_dataset() -> EtvDataset {
         })
         .collect();
 
-    EtvDataset {
+    LvDataset {
         source_path: None,
         sheets,
         all_labels,

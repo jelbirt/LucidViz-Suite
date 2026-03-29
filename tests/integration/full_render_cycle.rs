@@ -6,7 +6,7 @@
 //!  3. Phase 9: multi-sheet LIS buffer frame count assertion.
 //!  4. Phase 9: SHA-256 golden-hash assertions across 5 key frames.
 
-use lv_data::{EtvDataset, EtvRow, EtvSheet, LisConfig, ShapeKind};
+use lv_data::{LisConfig, LvDataset, LvRow, LvSheet, ShapeKind};
 use lv_renderer::{build_lis_buffer, try_render_headless};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -23,9 +23,9 @@ fn render_headless_or_skip(frame: &lv_data::LisFrame, width: u32, height: u32) -
     }
 }
 
-fn make_small_dataset() -> EtvDataset {
-    let rows: Vec<EtvRow> = (0..10)
-        .map(|i| EtvRow {
+fn make_small_dataset() -> LvDataset {
+    let rows: Vec<LvRow> = (0..10)
+        .map(|i| LvRow {
             label: format!("n{i}"),
             x: (i as f64 - 5.0) * 50.0,
             y: 0.0,
@@ -49,9 +49,9 @@ fn make_small_dataset() -> EtvDataset {
         .collect();
 
     let all_labels = rows.iter().map(|r| r.label.clone()).collect();
-    EtvDataset {
+    LvDataset {
         source_path: None,
-        sheets: vec![EtvSheet {
+        sheets: vec![LvSheet {
             name: "T0".into(),
             sheet_index: 0,
             rows,
@@ -63,17 +63,17 @@ fn make_small_dataset() -> EtvDataset {
 
 /// Build a synthetic "canadian_migration_small"-equivalent dataset:
 /// 3 sheets × 5 labelled objects (positions vary per sheet).
-fn make_migration_dataset() -> EtvDataset {
+fn make_migration_dataset() -> LvDataset {
     let labels: Vec<String> = (0..5).map(|i| format!("city_{i}")).collect();
     let x_base = [-200.0, -100.0, 0.0, 100.0, 200.0f64];
     let y_base = [50.0, -30.0, 80.0, -60.0, 10.0f64];
 
-    let sheets: Vec<EtvSheet> = (0..3)
+    let sheets: Vec<LvSheet> = (0..3)
         .map(|si| {
-            let rows: Vec<EtvRow> = (0..5)
+            let rows: Vec<LvRow> = (0..5)
                 .map(|i| {
                     let shift = si as f64 * 20.0;
-                    EtvRow {
+                    LvRow {
                         label: labels[i].clone(),
                         x: x_base[i] + shift,
                         y: y_base[i] - shift * 0.5,
@@ -96,7 +96,7 @@ fn make_migration_dataset() -> EtvDataset {
                     }
                 })
                 .collect();
-            EtvSheet {
+            LvSheet {
                 name: format!("Year{}", 2010 + si * 5),
                 sheet_index: si,
                 rows,
@@ -105,7 +105,7 @@ fn make_migration_dataset() -> EtvDataset {
         })
         .collect();
 
-    EtvDataset {
+    LvDataset {
         source_path: None,
         sheets,
         all_labels: labels,

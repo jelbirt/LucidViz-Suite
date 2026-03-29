@@ -5,26 +5,26 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use std::sync::{atomic::AtomicBool, Arc};
 
-use lv_data::{EtvDataset, LisBuffer, LisConfig, ShapeKind};
+use lv_data::{LisBuffer, LisConfig, LvDataset, ShapeKind};
 use mf_pipeline::types::{MfOutput, MfSeriesOutput};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug)]
 pub struct AsRunOutcome {
-    pub dataset: EtvDataset,
+    pub dataset: LvDataset,
     pub dataset_path: PathBuf,
     pub warnings: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
 pub struct PendingDatasetLoad {
-    pub dataset: EtvDataset,
+    pub dataset: LvDataset,
     pub source_path: PathBuf,
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct RuntimeSnapshot {
-    pub dataset: Option<EtvDataset>,
+    pub dataset: Option<LvDataset>,
     pub source_path: Option<PathBuf>,
     pub lis_buffer: Option<LisBuffer>,
     pub slice_index: u32,
@@ -319,7 +319,7 @@ impl AppState {
         &self.runtime
     }
 
-    pub fn dataset(&self) -> Option<&EtvDataset> {
+    pub fn dataset(&self) -> Option<&LvDataset> {
         self.runtime.dataset.as_ref()
     }
 
@@ -337,7 +337,7 @@ impl AppState {
 
     pub fn sync_runtime_snapshot(
         &mut self,
-        dataset: &EtvDataset,
+        dataset: &LvDataset,
         source_path: Option<PathBuf>,
         lis_buffer: &LisBuffer,
         slice_index: u32,
@@ -348,7 +348,7 @@ impl AppState {
         self.runtime.slice_index = slice_index;
     }
 
-    pub fn queue_dataset_load(&mut self, dataset: EtvDataset, source_path: PathBuf) {
+    pub fn queue_dataset_load(&mut self, dataset: LvDataset, source_path: PathBuf) {
         self.pending_dataset_load = Some(PendingDatasetLoad {
             dataset,
             source_path,
@@ -389,11 +389,11 @@ impl Default for AppState {
 #[cfg(test)]
 mod tests {
     use super::AppState;
-    use lv_data::{EtvDataset, LisBuffer, LisConfig};
+    use lv_data::{LisBuffer, LisConfig, LvDataset};
     use std::path::PathBuf;
 
-    fn sample_dataset() -> EtvDataset {
-        EtvDataset {
+    fn sample_dataset() -> LvDataset {
+        LvDataset {
             source_path: None,
             sheets: vec![],
             all_labels: vec!["alpha".into()],
@@ -440,7 +440,7 @@ mod tests {
             2,
         );
 
-        let pending_dataset = EtvDataset {
+        let pending_dataset = LvDataset {
             source_path: None,
             sheets: vec![],
             all_labels: vec!["beta".into()],

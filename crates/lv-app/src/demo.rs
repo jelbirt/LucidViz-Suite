@@ -13,9 +13,9 @@
 //!   Spin    -> trade velocity (large economies spin faster on Y-axis)
 //!   Edges   -> top bilateral trade relationships, strength ~ trade volume
 
-use lv_data::{EtvDataset, EtvRow, EtvSheet, ShapeKind};
+use lv_data::{LvDataset, LvRow, LvSheet, ShapeKind};
 
-pub fn make_demo_dataset() -> EtvDataset {
+pub fn make_demo_dataset() -> LvDataset {
     // ── node catalogue ────────────────────────────────────────────────────────
     // (label, region, gdp_tier 0-4, base_x, base_y, base_z, spin_y deg/frame)
     #[allow(clippy::type_complexity)]
@@ -159,11 +159,11 @@ pub fn make_demo_dataset() -> EtvDataset {
     let num_sheets: usize = 8;
     let all_labels: Vec<String> = nodes.iter().map(|(l, ..)| l.to_string()).collect();
 
-    let sheets: Vec<EtvSheet> = (0..num_sheets)
+    let sheets: Vec<LvSheet> = (0..num_sheets)
         .map(|s| {
             let year_offset = s as f64;
 
-            let rows: Vec<EtvRow> = nodes
+            let rows: Vec<LvRow> = nodes
                 .iter()
                 .map(|(label, region, gdp_tier, bx, by, bz, spin_y)| {
                     let (dx, dy, dz) = drift.get(label).copied().unwrap_or((0.0, 0.0, 0.0));
@@ -189,7 +189,7 @@ pub fn make_demo_dataset() -> EtvDataset {
                         * 2.0;
 
                     let (cr, cg, cb) = region_color[*region];
-                    EtvRow {
+                    LvRow {
                         label: label.to_string(),
                         x: bx + dx * year_offset + nx,
                         y: by + dy * year_offset + ny,
@@ -201,7 +201,7 @@ pub fn make_demo_dataset() -> EtvDataset {
                         color_b: cb,
                         cluster_value: *gdp_tier as f64,
                         spin_y: *spin_y,
-                        ..EtvRow::default()
+                        ..LvRow::default()
                     }
                 })
                 .collect();
@@ -222,7 +222,7 @@ pub fn make_demo_dataset() -> EtvDataset {
                 })
                 .collect();
 
-            EtvSheet {
+            LvSheet {
                 name: format!("{}", 2017 + s),
                 sheet_index: s,
                 rows,
@@ -231,7 +231,7 @@ pub fn make_demo_dataset() -> EtvDataset {
         })
         .collect();
 
-    EtvDataset {
+    LvDataset {
         source_path: None,
         sheets,
         all_labels,

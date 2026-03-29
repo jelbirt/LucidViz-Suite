@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 
 use anyhow::{bail, Context as _, Result};
-use lv_data::{EtvDataset, LisBuffer, LisConfig};
+use lv_data::{LisBuffer, LisConfig, LvDataset};
 use lv_renderer::{ArcballCamera, WgpuContext};
 
 use crate::sequence::export_frame;
@@ -47,7 +47,7 @@ impl Default for VideoConfig {
 #[allow(clippy::too_many_arguments)]
 pub fn export_video(
     ctx: &WgpuContext,
-    dataset: &EtvDataset,
+    dataset: &LvDataset,
     lis_config: &LisConfig,
     buffer: &LisBuffer,
     camera: &ArcballCamera,
@@ -77,7 +77,7 @@ pub fn export_video(
 #[allow(clippy::too_many_arguments)]
 pub fn export_video_with_control(
     ctx: &WgpuContext,
-    dataset: &EtvDataset,
+    dataset: &LvDataset,
     lis_config: &LisConfig,
     buffer: &LisBuffer,
     camera: &ArcballCamera,

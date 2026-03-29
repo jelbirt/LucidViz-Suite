@@ -6,15 +6,15 @@
 #[cfg(test)]
 mod tests {
     use lv_data::{
-        json_io::{read_etv_json_bytes, write_etv_json_bytes},
+        json_io::{read_lv_json_bytes, write_lv_json_bytes},
         validate_dataset,
-        xlsx_reader::read_etv_xlsx_bytes,
-        xlsx_writer::write_etv_xlsx_bytes,
-        EdgeRow, EtvDataset, EtvRow, EtvSheet, ShapeKind,
+        xlsx_reader::read_lv_xlsx_bytes,
+        xlsx_writer::write_lv_xlsx_bytes,
+        EdgeRow, LvDataset, LvRow, LvSheet, ShapeKind,
     };
 
-    fn two_sheet_dataset() -> EtvDataset {
-        let make_row = |label: &str, x: f64, shape: ShapeKind| EtvRow {
+    fn two_sheet_dataset() -> LvDataset {
+        let make_row = |label: &str, x: f64, shape: ShapeKind| LvRow {
             label: label.into(),
             x,
             y: 0.0,
@@ -36,7 +36,7 @@ mod tests {
             beats: 0,
         };
 
-        let sheet0 = EtvSheet {
+        let sheet0 = LvSheet {
             name: "T0".into(),
             sheet_index: 0,
             rows: vec![
@@ -58,7 +58,7 @@ mod tests {
             ],
         };
 
-        let sheet1 = EtvSheet {
+        let sheet1 = LvSheet {
             name: "T1".into(),
             sheet_index: 1,
             rows: vec![
@@ -73,7 +73,7 @@ mod tests {
             }],
         };
 
-        EtvDataset {
+        LvDataset {
             source_path: None,
             sheets: vec![sheet0, sheet1],
             all_labels: vec!["Alpha".into(), "Beta".into(), "Gamma".into()],
@@ -90,12 +90,12 @@ mod tests {
         validate_dataset(&original).expect("original dataset should be valid");
 
         // Write to bytes
-        let bytes = write_etv_xlsx_bytes(&original).expect("write_etv_xlsx_bytes");
+        let bytes = write_lv_xlsx_bytes(&original).expect("write_lv_xlsx_bytes");
         assert!(!bytes.is_empty());
         assert_eq!(&bytes[..2], b"PK", "XLSX must start with ZIP magic bytes");
 
         // Read back
-        let recovered = read_etv_xlsx_bytes(&bytes).expect("read_etv_xlsx_bytes");
+        let recovered = read_lv_xlsx_bytes(&bytes).expect("read_lv_xlsx_bytes");
 
         assert_eq!(recovered.sheets.len(), 2, "should have 2 sheets");
 
@@ -130,22 +130,22 @@ mod tests {
     #[test]
     fn xlsx_all_shape_kinds_survive_round_trip() {
         let shapes = ShapeKind::ALL;
-        let rows: Vec<EtvRow> = shapes
+        let rows: Vec<LvRow> = shapes
             .iter()
             .enumerate()
-            .map(|(i, &shape)| EtvRow {
+            .map(|(i, &shape)| LvRow {
                 label: format!("node_{i}"),
                 x: i as f64,
                 size: 1.0,
                 velocity: 64,
                 shape,
-                ..EtvRow::default()
+                ..LvRow::default()
             })
             .collect();
 
-        let ds = EtvDataset {
+        let ds = LvDataset {
             source_path: None,
-            sheets: vec![EtvSheet {
+            sheets: vec![LvSheet {
                 name: "shapes".into(),
                 sheet_index: 0,
                 rows,
@@ -158,8 +158,8 @@ mod tests {
                 .collect(),
         };
 
-        let bytes = write_etv_xlsx_bytes(&ds).expect("write");
-        let recovered = read_etv_xlsx_bytes(&bytes).expect("read");
+        let bytes = write_lv_xlsx_bytes(&ds).expect("write");
+        let recovered = read_lv_xlsx_bytes(&bytes).expect("read");
 
         for (i, &shape) in shapes.iter().enumerate() {
             assert_eq!(
@@ -171,7 +171,7 @@ mod tests {
 
     #[test]
     fn xlsx_midi_fields_survive_round_trip() {
-        let row = EtvRow {
+        let row = LvRow {
             label: "miditest".into(),
             x: 0.0,
             size: 1.0,
@@ -179,11 +179,11 @@ mod tests {
             instrument: 365,
             channel: 15,
             velocity: 1,
-            ..EtvRow::default()
+            ..LvRow::default()
         };
-        let ds = EtvDataset {
+        let ds = LvDataset {
             source_path: None,
-            sheets: vec![EtvSheet {
+            sheets: vec![LvSheet {
                 name: "S".into(),
                 sheet_index: 0,
                 rows: vec![row],
@@ -191,8 +191,8 @@ mod tests {
             }],
             all_labels: vec!["miditest".into()],
         };
-        let bytes = write_etv_xlsx_bytes(&ds).expect("write");
-        let recovered = read_etv_xlsx_bytes(&bytes).expect("read");
+        let bytes = write_lv_xlsx_bytes(&ds).expect("write");
+        let recovered = read_lv_xlsx_bytes(&bytes).expect("read");
         let r = &recovered.sheets[0].rows[0];
         assert_eq!(r.note, 127);
         assert_eq!(r.instrument, 365);
@@ -205,8 +205,8 @@ mod tests {
     #[test]
     fn json_round_trip_two_sheets() {
         let original = two_sheet_dataset();
-        let bytes = write_etv_json_bytes(&original).expect("write_etv_json_bytes");
-        let recovered = read_etv_json_bytes(&bytes).expect("read_etv_json_bytes");
+        let bytes = write_lv_json_bytes(&original).expect("write_lv_json_bytes");
+        let recovered = read_lv_json_bytes(&bytes).expect("read_lv_json_bytes");
 
         assert_eq!(recovered.sheets.len(), original.sheets.len());
         for (orig_sheet, rec_sheet) in original.sheets.iter().zip(recovered.sheets.iter()) {
@@ -223,23 +223,23 @@ mod tests {
 
     #[test]
     fn directed_edges_survive_xlsx_and_json_round_trip() {
-        let dataset = EtvDataset {
+        let dataset = LvDataset {
             source_path: None,
-            sheets: vec![EtvSheet {
+            sheets: vec![LvSheet {
                 name: "T0".into(),
                 sheet_index: 0,
                 rows: vec![
-                    EtvRow {
+                    LvRow {
                         label: "Alpha".into(),
                         size: 1.0,
                         velocity: 64,
-                        ..EtvRow::default()
+                        ..LvRow::default()
                     },
-                    EtvRow {
+                    LvRow {
                         label: "Beta".into(),
                         size: 1.0,
                         velocity: 64,
-                        ..EtvRow::default()
+                        ..LvRow::default()
                     },
                 ],
                 edges: vec![
@@ -258,12 +258,12 @@ mod tests {
             all_labels: vec!["Alpha".into(), "Beta".into()],
         };
 
-        let xlsx_bytes = write_etv_xlsx_bytes(&dataset).expect("write xlsx");
-        let xlsx_recovered = read_etv_xlsx_bytes(&xlsx_bytes).expect("read xlsx");
+        let xlsx_bytes = write_lv_xlsx_bytes(&dataset).expect("write xlsx");
+        let xlsx_recovered = read_lv_xlsx_bytes(&xlsx_bytes).expect("read xlsx");
         assert_eq!(xlsx_recovered.sheets[0].edges, dataset.sheets[0].edges);
 
-        let json_bytes = write_etv_json_bytes(&dataset).expect("write json");
-        let json_recovered = read_etv_json_bytes(&json_bytes).expect("read json");
+        let json_bytes = write_lv_json_bytes(&dataset).expect("write json");
+        let json_recovered = read_lv_json_bytes(&json_bytes).expect("read json");
         assert_eq!(json_recovered.sheets[0].edges, dataset.sheets[0].edges);
     }
 

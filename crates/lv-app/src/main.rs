@@ -13,7 +13,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use app_state::{build_gpu_edges, compute_ego_edges, compute_visible_objects, EgoClusterState};
-use lv_data::{EtvDataset, GpuInstance, LisBuffer, LisConfig, ShapeKind};
+use lv_data::{GpuInstance, LisBuffer, LisConfig, LvDataset, ShapeKind};
 use lv_gui::state::PlayState;
 use lv_gui::{AppState, LucidWorkspace};
 use lv_renderer::shapes::{self, cube, cylinder, point, pyramid, sphere, torus};
@@ -49,7 +49,7 @@ use winit::{
 
 mod demo;
 
-fn make_demo_dataset() -> EtvDataset {
+fn make_demo_dataset() -> LvDataset {
     demo::make_demo_dataset()
 }
 
@@ -57,7 +57,7 @@ fn make_demo_dataset() -> EtvDataset {
 
 // The following block is compiled-out dead code from the original inline:
 #[cfg(any())]
-fn _removed() -> EtvDataset {
+fn _removed() -> LvDataset {
     let nodes: &[(&str, usize, u32, f64, f64, f64, f64)] = &[
         // Americas  (region 0)  shape=Sphere  colour=blue
         ("USA", 0, 4, 4.0, 1.5, 0.5, 0.8),
@@ -206,11 +206,11 @@ fn _removed() -> EtvDataset {
     let num_sheets: usize = 8;
     let all_labels: Vec<String> = nodes.iter().map(|(l, ..)| l.to_string()).collect();
 
-    let sheets: Vec<EtvSheet> = (0..num_sheets)
+    let sheets: Vec<LvSheet> = (0..num_sheets)
         .map(|s| {
             let year_offset = s as f64;
 
-            let rows: Vec<EtvRow> = nodes
+            let rows: Vec<LvRow> = nodes
                 .iter()
                 .map(|(label, region, gdp_tier, bx, by, bz, spin_y)| {
                     let (dx, dy, dz) = drift.get(label).copied().unwrap_or((0.0, 0.0, 0.0));
@@ -238,7 +238,7 @@ fn _removed() -> EtvDataset {
                         * 2.0;
 
                     let (cr, cg, cb) = region_color[*region];
-                    EtvRow {
+                    LvRow {
                         label: label.to_string(),
                         x: bx + dx * year_offset + nx,
                         y: by + dy * year_offset + ny,
@@ -250,7 +250,7 @@ fn _removed() -> EtvDataset {
                         color_b: cb,
                         cluster_value: *gdp_tier as f64,
                         spin_y: *spin_y,
-                        ..EtvRow::default()
+                        ..LvRow::default()
                     }
                 })
                 .collect();
@@ -272,7 +272,7 @@ fn _removed() -> EtvDataset {
                 })
                 .collect();
 
-            EtvSheet {
+            LvSheet {
                 name: format!("{}", 2017 + s),
                 sheet_index: s,
                 rows,
@@ -281,7 +281,7 @@ fn _removed() -> EtvDataset {
         })
         .collect();
 
-    EtvDataset {
+    LvDataset {
         source_path: None,
         sheets,
         all_labels,
@@ -329,7 +329,7 @@ struct Renderer {
     uniform_buf: wgpu::Buffer,
     depth_view: wgpu::TextureView,
     lis_buffer: LisBuffer,
-    dataset: EtvDataset,
+    dataset: LvDataset,
     lis_config: LisConfig,
     slice_index: u32,
     workspace: LucidWorkspace,
@@ -1486,10 +1486,10 @@ fn group_instances_by_shape(instances: &[GpuInstance]) -> [Vec<GpuInstance>; Sha
     grouped
 }
 
-fn load_dataset_from_path(path: &Path) -> anyhow::Result<EtvDataset> {
+fn load_dataset_from_path(path: &Path) -> anyhow::Result<LvDataset> {
     match path.extension().and_then(|ext| ext.to_str()) {
         Some("json") => Ok(lv_data::load_dataset_json(path)?),
-        _ => Ok(lv_data::read_etv_xlsx(path)?),
+        _ => Ok(lv_data::read_lv_xlsx(path)?),
     }
 }
 

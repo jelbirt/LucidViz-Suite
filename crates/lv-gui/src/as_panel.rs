@@ -12,7 +12,7 @@ use as_pipeline::types::{
     AsDistancePipelineInput, AsPipelineInput, AsPipelineResult, CentralityMode, MdsConfig,
     MdsDimMode, NormalizationMode, ProcrustesMode, SmacofConfig, SmacofInit,
 };
-use lv_data::{write_etv_json, EtvDataset};
+use lv_data::{write_lv_json, LvDataset};
 use ndarray::Array2;
 
 use crate::state::{
@@ -318,7 +318,7 @@ impl AsPanel {
         }
     }
 
-    fn launch_dataset_job(&self, ds: &EtvDataset, output_dir: PathBuf, state: &mut AppState) {
+    fn launch_dataset_job(&self, ds: &LvDataset, output_dir: PathBuf, state: &mut AppState) {
         let (tx, rx) = mpsc::channel::<PipelineEvent>();
 
         let source_dataset = ds.clone();
@@ -499,12 +499,12 @@ impl AsPanel {
     }
 }
 
-fn preserve_lv_metadata(result: &mut AsPipelineResult, source: &EtvDataset) {
-    for (sheet_idx, output_sheet) in result.etv_dataset.sheets.iter_mut().enumerate() {
+fn preserve_lv_metadata(result: &mut AsPipelineResult, source: &LvDataset) {
+    for (sheet_idx, output_sheet) in result.lv_dataset.sheets.iter_mut().enumerate() {
         let Some(source_sheet) = source.sheets.get(sheet_idx) else {
             continue;
         };
-        let source_rows: HashMap<&str, &lv_data::schema::EtvRow> = source_sheet
+        let source_rows: HashMap<&str, &lv_data::schema::LvRow> = source_sheet
             .rows
             .iter()
             .map(|row| (row.label.as_str(), row))
@@ -523,8 +523,8 @@ fn preserve_lv_metadata(result: &mut AsPipelineResult, source: &EtvDataset) {
         }
     }
 
-    result.etv_dataset.all_labels =
-        EtvDataset::canonical_all_labels_from_sheets(&result.etv_dataset.sheets);
+    result.lv_dataset.all_labels =
+        LvDataset::canonical_all_labels_from_sheets(&result.lv_dataset.sheets);
 }
 
 #[derive(Debug, Clone)]
@@ -566,12 +566,12 @@ fn build_mf_distance_input(
     })
 }
 
-fn collect_dataset_labels(ds: &EtvDataset) -> Vec<String> {
+fn collect_dataset_labels(ds: &LvDataset) -> Vec<String> {
     ds.canonical_all_labels()
 }
 
 fn build_dataset_adjacencies(
-    ds: &EtvDataset,
+    ds: &LvDataset,
     all_labels: &[String],
 ) -> (Vec<(String, Array2<f64>)>, Vec<String>) {
     let n = all_labels.len();
@@ -634,12 +634,12 @@ fn write_gui_output_artifacts(
 ) -> Result<AsRunOutcome, String> {
     write_as_results(result, output_dir).map_err(|e| e.to_string())?;
 
-    let dataset_path = output_dir.join("etv_dataset.json");
-    write_etv_json(&result.etv_dataset, &dataset_path).map_err(|e| e.to_string())?;
+    let dataset_path = output_dir.join("lv_dataset.json");
+    write_lv_json(&result.lv_dataset, &dataset_path).map_err(|e| e.to_string())?;
     write_warnings_file(output_dir, warnings)?;
 
     Ok(AsRunOutcome {
-        dataset: result.etv_dataset.clone(),
+        dataset: result.lv_dataset.clone(),
         dataset_path,
         warnings: warnings.to_vec(),
     })
@@ -657,28 +657,28 @@ mod tests {
         MdsCoordinates, ProcrustesResult,
     };
     use as_pipeline::types::{MdsConfig, MdsDimMode, NormalizationMode, ProcrustesMode};
-    use lv_data::schema::{EdgeRow, EtvDataset, EtvRow, EtvSheet};
+    use lv_data::schema::{EdgeRow, LvDataset, LvRow, LvSheet};
     use mf_pipeline::types::{MfOutput, SimToDistMethod};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn collect_dataset_labels_uses_union_across_dataset() {
-        let dataset = EtvDataset {
+        let dataset = LvDataset {
             source_path: None,
             sheets: vec![
-                EtvSheet {
+                LvSheet {
                     name: "T1".into(),
                     sheet_index: 0,
-                    rows: vec![EtvRow {
+                    rows: vec![LvRow {
                         label: "alpha".into(),
                         ..Default::default()
                     }],
                     edges: vec![],
                 },
-                EtvSheet {
+                LvSheet {
                     name: "T2".into(),
                     sheet_index: 1,
-                    rows: vec![EtvRow {
+                    rows: vec![LvRow {
                         label: "beta".into(),
                         ..Default::default()
                     }],
@@ -696,12 +696,12 @@ mod tests {
 
     #[test]
     fn collect_dataset_labels_discards_stale_all_labels_entries() {
-        let dataset = EtvDataset {
+        let dataset = LvDataset {
             source_path: None,
-            sheets: vec![EtvSheet {
+            sheets: vec![LvSheet {
                 name: "T1".into(),
                 sheet_index: 0,
-                rows: vec![EtvRow {
+                rows: vec![LvRow {
                     label: "alpha".into(),
                     ..Default::default()
                 }],
@@ -715,12 +715,12 @@ mod tests {
 
     #[test]
     fn build_dataset_adjacencies_reports_unknown_edge_labels() {
-        let dataset = EtvDataset {
+        let dataset = LvDataset {
             source_path: None,
-            sheets: vec![EtvSheet {
+            sheets: vec![LvSheet {
                 name: "T1".into(),
                 sheet_index: 0,
-                rows: vec![EtvRow {
+                rows: vec![LvRow {
                     label: "alpha".into(),
                     ..Default::default()
                 }],
@@ -741,17 +741,17 @@ mod tests {
 
     #[test]
     fn build_dataset_adjacencies_preserves_edge_direction() {
-        let dataset = EtvDataset {
+        let dataset = LvDataset {
             source_path: None,
-            sheets: vec![EtvSheet {
+            sheets: vec![LvSheet {
                 name: "T1".into(),
                 sheet_index: 0,
                 rows: vec![
-                    EtvRow {
+                    LvRow {
                         label: "alpha".into(),
                         ..Default::default()
                     },
-                    EtvRow {
+                    LvRow {
                         label: "beta".into(),
                         ..Default::default()
                     },
@@ -847,12 +847,12 @@ mod tests {
             centrality_mode: CentralityMode::Directed,
             distance_matrices: vec![DistanceMatrix::new(vec!["alpha".into()], vec![0.0])
                 .expect("test distance matrix should build")],
-            etv_dataset: EtvDataset {
+            lv_dataset: LvDataset {
                 source_path: None,
-                sheets: vec![EtvSheet {
+                sheets: vec![LvSheet {
                     name: "T1".into(),
                     sheet_index: 0,
-                    rows: vec![EtvRow {
+                    rows: vec![LvRow {
                         label: "alpha".into(),
                         ..Default::default()
                     }],
@@ -873,16 +873,16 @@ mod tests {
 
         assert_eq!(
             outcome.dataset_path.file_name().and_then(|s| s.to_str()),
-            Some("etv_dataset.json")
+            Some("lv_dataset.json")
         );
 
         let as_result_json = std::fs::read_to_string(out_dir.join("as_result.json"))
             .expect("as_result.json should exist");
         assert!(as_result_json.contains("\"procrustes\""));
-        assert!(as_result_json.contains("\"etv_dataset\""));
+        assert!(as_result_json.contains("\"lv_dataset\""));
 
         let dataset_json =
-            std::fs::read_to_string(&outcome.dataset_path).expect("etv dataset json should exist");
+            std::fs::read_to_string(&outcome.dataset_path).expect("lv dataset json should exist");
         assert!(dataset_json.contains("\"all_labels\""));
         assert!(!dataset_json.contains("\"procrustes\""));
 
@@ -927,12 +927,12 @@ mod tests {
 
     #[test]
     fn preserve_lv_metadata_keeps_source_row_fields_and_updates_positions() {
-        let source = EtvDataset {
+        let source = LvDataset {
             source_path: None,
-            sheets: vec![EtvSheet {
+            sheets: vec![LvSheet {
                 name: "T1".into(),
                 sheet_index: 0,
-                rows: vec![EtvRow {
+                rows: vec![LvRow {
                     label: "alpha".into(),
                     x: 10.0,
                     y: 20.0,
@@ -964,12 +964,12 @@ mod tests {
             centralities: vec![],
             centrality_mode: CentralityMode::Directed,
             distance_matrices: vec![],
-            etv_dataset: EtvDataset {
+            lv_dataset: LvDataset {
                 source_path: None,
-                sheets: vec![EtvSheet {
+                sheets: vec![LvSheet {
                     name: "T1".into(),
                     sheet_index: 0,
-                    rows: vec![EtvRow {
+                    rows: vec![LvRow {
                         label: "alpha".into(),
                         x: 1.0,
                         y: 2.0,
@@ -984,7 +984,7 @@ mod tests {
 
         preserve_lv_metadata(&mut result, &source);
 
-        let row = &result.etv_dataset.sheets[0].rows[0];
+        let row = &result.lv_dataset.sheets[0].rows[0];
         assert_eq!(row.x, 1.0);
         assert_eq!(row.y, 2.0);
         assert_eq!(row.z, 3.0);

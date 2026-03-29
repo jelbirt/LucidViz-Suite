@@ -3,7 +3,7 @@ use std::path::Path;
 
 use calamine::{open_workbook_auto, open_workbook_auto_from_rs, Data, DataType, Reader};
 
-use crate::{validate_dataset, DataError, EdgeRow, EtvDataset, EtvRow, EtvSheet, ShapeKind};
+use crate::{validate_dataset, DataError, EdgeRow, LvDataset, LvRow, LvSheet, ShapeKind};
 
 const MAX_XLSX_BYTES: u64 = 128 * 1024 * 1024;
 
@@ -11,8 +11,8 @@ const MAX_XLSX_BYTES: u64 = 128 * 1024 * 1024;
 // Public API
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Read an ETV workbook from a file path.
-pub fn read_etv_xlsx(path: &Path) -> Result<EtvDataset, DataError> {
+/// Read an LV workbook from a file path.
+pub fn read_lv_xlsx(path: &Path) -> Result<LvDataset, DataError> {
     let metadata = std::fs::metadata(path)?;
     if metadata.len() > MAX_XLSX_BYTES {
         return Err(DataError::FileTooLarge {
@@ -25,10 +25,10 @@ pub fn read_etv_xlsx(path: &Path) -> Result<EtvDataset, DataError> {
     parse_workbook(&mut workbook, Some(path.to_path_buf()))
 }
 
-/// Read an ETV workbook from an in-memory byte slice.
+/// Read an LV workbook from an in-memory byte slice.
 ///
 /// This variant is WASM-compatible (no filesystem access required).
-pub fn read_etv_xlsx_bytes(bytes: &[u8]) -> Result<EtvDataset, DataError> {
+pub fn read_lv_xlsx_bytes(bytes: &[u8]) -> Result<LvDataset, DataError> {
     if bytes.len() as u64 > MAX_XLSX_BYTES {
         return Err(DataError::FileTooLarge {
             path: "<memory>".into(),
@@ -48,7 +48,7 @@ pub fn read_etv_xlsx_bytes(bytes: &[u8]) -> Result<EtvDataset, DataError> {
 fn parse_workbook<RS>(
     workbook: &mut calamine::Sheets<RS>,
     source_path: Option<std::path::PathBuf>,
-) -> Result<EtvDataset, DataError>
+) -> Result<LvDataset, DataError>
 where
     RS: Read + Seek,
 {
@@ -57,17 +57,17 @@ where
         return Err(DataError::NoSheets);
     }
 
-    let mut sheets: Vec<EtvSheet> = Vec::new();
+    let mut sheets: Vec<LvSheet> = Vec::new();
 
     for (sheet_index, name) in sheet_names.iter().enumerate() {
         let range = workbook.worksheet_range(name)?;
-        let etv_sheet = parse_sheet(range, name, sheet_index)?;
+        let lv_sheet = parse_sheet(range, name, sheet_index)?;
 
-        sheets.push(etv_sheet);
+        sheets.push(lv_sheet);
     }
 
-    let all_labels = EtvDataset::canonical_all_labels_from_sheets(&sheets);
-    let dataset = EtvDataset {
+    let all_labels = LvDataset::canonical_all_labels_from_sheets(&sheets);
+    let dataset = LvDataset {
         source_path,
         sheets,
         all_labels,
@@ -80,7 +80,7 @@ fn parse_sheet(
     range: calamine::Range<Data>,
     name: &str,
     sheet_index: usize,
-) -> Result<EtvSheet, DataError> {
+) -> Result<LvSheet, DataError> {
     // Collect all rows up-front so we can search for the edge boundary
     let rows_raw: Vec<Vec<Data>> = range.rows().map(|r| r.to_vec()).collect();
 
@@ -100,10 +100,10 @@ fn parse_sheet(
         &rows_raw[1..object_end]
     };
 
-    let mut rows: Vec<EtvRow> = Vec::with_capacity(object_rows.len());
+    let mut rows: Vec<LvRow> = Vec::with_capacity(object_rows.len());
     for (i, raw) in object_rows.iter().enumerate() {
         // i+2 because row 0 = header, row 1 = first data row (1-based)
-        if let Some(row) = parse_etv_row(raw, name, i + 2)? {
+        if let Some(row) = parse_lv_row(raw, name, i + 2)? {
             rows.push(row);
         }
     }
@@ -123,7 +123,7 @@ fn parse_sheet(
         }
     }
 
-    Ok(EtvSheet {
+    Ok(LvSheet {
         name: name.to_owned(),
         sheet_index,
         rows,
@@ -132,7 +132,7 @@ fn parse_sheet(
 }
 
 /// Returns `Ok(None)` for blank/sentinel rows.
-fn parse_etv_row(raw: &[Data], sheet: &str, row_num: usize) -> Result<Option<EtvRow>, DataError> {
+fn parse_lv_row(raw: &[Data], sheet: &str, row_num: usize) -> Result<Option<LvRow>, DataError> {
     match raw.first() {
         None | Some(Data::Empty) => return Ok(None),
         _ => {}
@@ -183,7 +183,7 @@ fn parse_etv_row(raw: &[Data], sheet: &str, row_num: usize) -> Result<Option<Etv
     let cluster_value = cell_f64(raw, 17).unwrap_or(0.0);
     let beats = optional_integer_cell(raw, 18, sheet, row_num, 0.0, 0.0, u32::MAX as f64)? as u32;
 
-    Ok(Some(EtvRow {
+    Ok(Some(LvRow {
         label,
         x,
         y,
@@ -356,10 +356,10 @@ mod tests {
     }
 
     #[test]
-    fn parse_etv_row_rejects_fractional_velocity() {
+    fn parse_lv_row_rejects_fractional_velocity() {
         let mut row = base_row();
         row[16] = Data::Float(64.5);
-        let err = parse_etv_row(&row, "Sheet1", 2).expect_err("fractional velocity should fail");
+        let err = parse_lv_row(&row, "Sheet1", 2).expect_err("fractional velocity should fail");
         assert!(matches!(err, DataError::ValueOutOfRange { col: 16, .. }));
     }
 
@@ -375,9 +375,9 @@ mod tests {
     }
 
     #[test]
-    fn read_etv_xlsx_bytes_rejects_oversized_input() {
+    fn read_lv_xlsx_bytes_rejects_oversized_input() {
         let bytes = vec![0; (MAX_XLSX_BYTES + 1) as usize];
-        let err = read_etv_xlsx_bytes(&bytes).expect_err("oversized xlsx should fail");
+        let err = read_lv_xlsx_bytes(&bytes).expect_err("oversized xlsx should fail");
         assert!(matches!(err, DataError::FileTooLarge { .. }));
     }
 }

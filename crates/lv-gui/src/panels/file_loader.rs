@@ -1,13 +1,13 @@
 //! File loader panel — XLSX / JSON file picker and dataset summary.
 
-use lv_data::{load_dataset_json, read_etv_xlsx, EtvDataset};
+use lv_data::{load_dataset_json, read_lv_xlsx, LvDataset};
 
 use crate::state::AppState;
 
 /// Events emitted by the file loader panel.
 pub enum FileLoaderEvent {
     Loaded {
-        dataset: EtvDataset,
+        dataset: LvDataset,
         path: std::path::PathBuf,
     },
     Error(String),
@@ -30,7 +30,7 @@ impl FileLoaderPanel {
                 .add_filter("XLSX", &["xlsx"])
                 .pick_file()
             {
-                match read_etv_xlsx(&path) {
+                match read_lv_xlsx(&path) {
                     Ok(dataset) => ev = FileLoaderEvent::Loaded { dataset, path },
                     Err(e) => ev = FileLoaderEvent::Error(format!("XLSX load error: {e}")),
                 }
@@ -59,7 +59,7 @@ impl FileLoaderPanel {
                 let result = if p.extension().and_then(|e| e.to_str()) == Some("json") {
                     load_dataset_json(&p).map_err(|e| e.to_string())
                 } else {
-                    read_etv_xlsx(&p).map_err(|e| e.to_string())
+                    read_lv_xlsx(&p).map_err(|e| e.to_string())
                 };
                 match result {
                     Ok(dataset) => ev = FileLoaderEvent::Loaded { dataset, path: p },

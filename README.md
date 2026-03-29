@@ -108,7 +108,7 @@ cargo bench -p lv-renderer
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `native-io` | ✅ | Enables `read_etv_xlsx` and `load_dataset_json` |
+| `native-io` | ✅ | Enables `read_lv_xlsx` and `load_dataset_json` |
 | `wasm` | ❌ | Disables all file I/O for `wasm32-unknown-unknown` |
 
 ## WASM scaffold build (experimental)
