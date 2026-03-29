@@ -341,13 +341,30 @@ fn normalize_output_coordinates(
     }
 }
 
+/// Maximum number of candidates to evaluate via Procrustes. For large time
+/// series (K > MAX_CANDIDATES) we subsample evenly to avoid O(K²) SVD cost.
+const MAX_PROCRUSTES_CANDIDATES: usize = 8;
+
 fn choose_optimal_reference(
     raw_coords: &[MdsCoordinates],
     procrustes_scale: bool,
 ) -> Result<usize> {
+    let k = raw_coords.len();
+
+    // Build candidate indices — subsample evenly if K is large
+    let candidate_indices: Vec<usize> = if k <= MAX_PROCRUSTES_CANDIDATES {
+        (0..k).collect()
+    } else {
+        let step = k as f64 / MAX_PROCRUSTES_CANDIDATES as f64;
+        (0..MAX_PROCRUSTES_CANDIDATES)
+            .map(|i| ((i as f64 * step) as usize).min(k - 1))
+            .collect()
+    };
+
     let mut best: Option<(usize, f64)> = None;
 
-    for (candidate_idx, candidate) in raw_coords.iter().enumerate() {
+    for &candidate_idx in &candidate_indices {
+        let candidate = &raw_coords[candidate_idx];
         let mut total_residual = 0.0;
         let mut valid = true;
 

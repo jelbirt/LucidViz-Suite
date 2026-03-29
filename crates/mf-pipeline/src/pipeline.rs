@@ -48,7 +48,7 @@ pub fn run_mf_pipeline(config: &MfPipelineConfig) -> Result<MfOutput> {
     let tokens = filter_stopwords(tokens, &config.mf_config.language);
 
     // 5. Co-occurrence
-    let cooccurrence = build_cooccurrence(&tokens, &config.mf_config);
+    let mut cooccurrence = build_cooccurrence(&tokens, &config.mf_config);
 
     if cooccurrence.vocab_size == 0 {
         bail!(MfError::EmptyVocabulary);
@@ -57,15 +57,18 @@ pub fn run_mf_pipeline(config: &MfPipelineConfig) -> Result<MfOutput> {
     let n = cooccurrence.vocab_size;
     let labels: Vec<String> = cooccurrence.vocab.iter().map(|t| t.0.clone()).collect();
 
-    // 6. PMI / similarity
+    // 6. PMI / similarity — avoid redundant N² clones
     let nppmi_matrix = compute_pmi(&cooccurrence);
-    let similarity_matrix = if config.mf_config.use_pmi {
-        nppmi_matrix.clone()
-    } else {
-        compute_count_similarity(&cooccurrence)
-    };
     let ppmi_matrix = compute_ppmi(&cooccurrence);
-    let raw_counts = cooccurrence.matrix.clone();
+    let (similarity_matrix, nppmi_matrix) = if config.mf_config.use_pmi {
+        // When using PMI, similarity IS nppmi — share the same allocation
+        let sim = nppmi_matrix;
+        (sim.clone(), sim)
+    } else {
+        (compute_count_similarity(&cooccurrence), nppmi_matrix)
+    };
+    // Take ownership of the raw counts instead of cloning
+    let raw_counts = std::mem::take(&mut cooccurrence.matrix);
 
     // 7. Build petgraph
     let pg = build_petgraph(&cooccurrence, &similarity_matrix, &config.mf_config);
@@ -186,7 +189,7 @@ fn build_output_with_shared_vocab(
 }
 
 fn build_output_from_cooccurrence(
-    cooccurrence: crate::types::CooccurrenceGraph,
+    mut cooccurrence: crate::types::CooccurrenceGraph,
     mf_config: &crate::types::MfConfig,
 ) -> Result<MfOutput> {
     if cooccurrence.vocab_size == 0 {
@@ -196,13 +199,14 @@ fn build_output_from_cooccurrence(
     let n = cooccurrence.vocab_size;
     let labels: Vec<String> = cooccurrence.vocab.iter().map(|t| t.0.clone()).collect();
     let nppmi_matrix = compute_pmi(&cooccurrence);
-    let similarity_matrix = if mf_config.use_pmi {
-        nppmi_matrix.clone()
-    } else {
-        compute_count_similarity(&cooccurrence)
-    };
     let ppmi_matrix = compute_ppmi(&cooccurrence);
-    let raw_counts = cooccurrence.matrix.clone();
+    let (similarity_matrix, nppmi_matrix) = if mf_config.use_pmi {
+        let sim = nppmi_matrix;
+        (sim.clone(), sim)
+    } else {
+        (compute_count_similarity(&cooccurrence), nppmi_matrix)
+    };
+    let raw_counts = std::mem::take(&mut cooccurrence.matrix);
     let pg = build_petgraph(&cooccurrence, &similarity_matrix, mf_config);
     let centrality = compute_centrality_full(&pg, &labels);
 
