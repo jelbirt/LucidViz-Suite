@@ -2,9 +2,10 @@ use as_pipeline::{
     mds::{classical::classical_mds, pivot::pivot_mds, smacof::smacof},
     types::{SeMatrix, SmacofConfig, SmacofInit},
 };
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
+use std::hint::black_box;
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 
@@ -14,13 +15,13 @@ fn random_dist(n: usize, seed: u64) -> SeMatrix {
     let mut data = vec![0.0f64; n * n];
     for i in 0..n {
         for j in (i + 1)..n {
-            let v: f64 = rng.gen_range(0.1..10.0);
+            let v: f64 = rng.random_range(0.1..10.0);
             data[i * n + j] = v;
             data[j * n + i] = v;
         }
     }
     let labels: Vec<String> = (0..n).map(|i| format!("node_{i}")).collect();
-    SeMatrix::new(labels, data)
+    SeMatrix::new(labels, data).unwrap()
 }
 
 // ── as-pipeline benchmarks ────────────────────────────────────────────────────
@@ -31,7 +32,7 @@ fn bench_se_n100(c: &mut Criterion) {
     let mut rng = SmallRng::seed_from_u64(1);
     for i in 0..n {
         for j in (i + 1)..n {
-            let v: f64 = rng.gen_range(0.1..10.0);
+            let v: f64 = rng.random_range(0.1..10.0);
             data[i * n + j] = v;
             data[j * n + i] = v;
         }
@@ -50,7 +51,7 @@ fn bench_se_n1000(c: &mut Criterion) {
     let mut rng = SmallRng::seed_from_u64(2);
     for i in 0..n {
         for j in (i + 1)..n {
-            let v: f64 = rng.gen_range(0.1..10.0);
+            let v: f64 = rng.random_range(0.1..10.0);
             data[i * n + j] = v;
             data[j * n + i] = v;
         }

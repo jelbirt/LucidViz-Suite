@@ -1,5 +1,6 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use lv_data::{EdgeRow, EtvDataset, EtvRow, EtvSheet, LisConfig, ShapeKind};
+use criterion::{criterion_group, criterion_main, Criterion};
+use std::hint::black_box;
+use lv_data::{EtvDataset, EtvRow, EtvSheet, LisConfig, ShapeKind};
 use lv_renderer::lis::{build_lis_buffer, compute_frame};
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
@@ -13,23 +14,23 @@ fn fake_dataset(n_objects: usize, n_sheets: usize) -> EtvDataset {
             let rows: Vec<EtvRow> = (0..n_objects)
                 .map(|i| EtvRow {
                     label: format!("obj_{i}"),
-                    x: rng.gen_range(-1.0..1.0),
-                    y: rng.gen_range(-1.0..1.0),
-                    z: rng.gen_range(-1.0..1.0),
-                    size: rng.gen_range(0.1..1.0),
+                    x: rng.random_range(-1.0..1.0),
+                    y: rng.random_range(-1.0..1.0),
+                    z: rng.random_range(-1.0..1.0),
+                    size: rng.random_range(0.1..1.0),
                     size_alpha: 1.0,
                     spin_x: 0.0,
                     spin_y: 0.0,
                     spin_z: 0.0,
                     shape: ShapeKind::Sphere,
-                    color_r: rng.gen_range(0.0..1.0),
-                    color_g: rng.gen_range(0.0..1.0),
-                    color_b: rng.gen_range(0.0..1.0),
+                    color_r: rng.random_range(0.0..1.0),
+                    color_g: rng.random_range(0.0..1.0),
+                    color_b: rng.random_range(0.0..1.0),
                     note: 0,
                     instrument: 0,
                     channel: 0,
                     velocity: 64,
-                    cluster_value: rng.gen_range(0.0..5.0),
+                    cluster_value: rng.random_range(0.0..5.0),
                     beats: 1,
                 })
                 .collect();

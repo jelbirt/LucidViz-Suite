@@ -1,8 +1,8 @@
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
+use std::hint::black_box;
 use mf_pipeline::{
     centrality::compute_betweenness_pg,
     cooccurrence::build_cooccurrence,
-    graph,
     types::{MfConfig, Token},
 };
 use rand::rngs::SmallRng;
@@ -13,7 +13,7 @@ use rand::{Rng, SeedableRng};
 fn random_tokens(n_tokens: usize, vocab_size: usize, seed: u64) -> Vec<Token> {
     let mut rng = SmallRng::seed_from_u64(seed);
     (0..n_tokens)
-        .map(|_| Token(format!("word_{}", rng.gen_range(0..vocab_size))))
+        .map(|_| Token(format!("word_{}", rng.random_range(0..vocab_size))))
         .collect()
 }
 
@@ -30,6 +30,7 @@ fn bench_cooccurrence_10k(c: &mut Criterion) {
         language: "en".to_string(),
         unicode_normalize: false,
         sim_to_dist: mf_pipeline::types::SimToDistMethod::Linear,
+        ..Default::default()
     };
     c.bench_function("cooccurrence_10k_tokens", |b| {
         b.iter(|| {
@@ -41,7 +42,6 @@ fn bench_cooccurrence_10k(c: &mut Criterion) {
 fn bench_brandes_n500(c: &mut Criterion) {
     // Build a random 500-node Erdős–Rényi graph (p=0.02 ≈ sparse).
     use petgraph::graph::UnGraph;
-    use petgraph::Undirected;
     let n = 500usize;
     let p = 0.02f64;
     let mut rng = SmallRng::seed_from_u64(42);
@@ -49,7 +49,7 @@ fn bench_brandes_n500(c: &mut Criterion) {
     let nodes: Vec<_> = (0..n).map(|i| g.add_node(format!("n{i}"))).collect();
     for i in 0..n {
         for j in (i + 1)..n {
-            if rng.gen::<f64>() < p {
+            if rng.random::<f64>() < p {
                 g.add_edge(nodes[i], nodes[j], 1.0);
             }
         }
