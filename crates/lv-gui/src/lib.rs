@@ -11,7 +11,7 @@ pub mod workspace;
 
 pub use as_panel::AsPanel;
 pub use mf_panel::MfPanel;
-pub use state::{AppState, EgoEdgeDirection};
+pub use state::{AppState, AudioState, ClusterState, EgoEdgeDirection, ExportState, SessionState};
 pub use workspace::{ActiveTab, LucidWorkspace, LvPanels};
 
 #[cfg(test)]

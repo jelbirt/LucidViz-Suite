@@ -24,80 +24,80 @@ mod inner {
             ui.separator();
 
             if ui.button("Refresh ports").clicked() {
-                state.pending_audio_request = Some(AudioRequest::RefreshPorts);
+                state.audio.pending_request = Some(AudioRequest::RefreshPorts);
             }
 
-            if state.audio_selected_port.is_empty() {
-                if let Some(first) = state.audio_ports.first() {
-                    state.audio_selected_port = first.clone();
+            if state.audio.selected_port.is_empty() {
+                if let Some(first) = state.audio.ports.first() {
+                    state.audio.selected_port = first.clone();
                 }
             }
 
-            if state.audio_ports.is_empty() {
+            if state.audio.ports.is_empty() {
                 ui.label("No MIDI ports found.");
             } else {
                 egui::ComboBox::from_label("Port")
-                    .selected_text(if state.audio_selected_port.is_empty() {
+                    .selected_text(if state.audio.selected_port.is_empty() {
                         "Select a port"
                     } else {
-                        &state.audio_selected_port
+                        &state.audio.selected_port
                     })
                     .show_ui(ui, |ui| {
-                        for port in &state.audio_ports {
-                            ui.selectable_value(&mut state.audio_selected_port, port.clone(), port);
+                        for port in &state.audio.ports {
+                            ui.selectable_value(&mut state.audio.selected_port, port.clone(), port);
                         }
                     });
             }
 
-            let connect_label = if state.audio_connected {
+            let connect_label = if state.audio.connected {
                 "Disconnect"
             } else {
                 "Connect"
             };
             if ui.button(connect_label).clicked() {
-                state.pending_audio_request = Some(if state.audio_connected {
+                state.audio.pending_request = Some(if state.audio.connected {
                     AudioRequest::Disconnect
                 } else {
-                    AudioRequest::Connect(state.audio_selected_port.clone())
+                    AudioRequest::Connect(state.audio.selected_port.clone())
                 });
             }
 
             ui.separator();
             ui.checkbox(
-                &mut state.audio_live_enabled,
+                &mut state.audio.live_enabled,
                 "Enable live LIS sonification",
             );
             ui.horizontal(|ui| {
                 ui.label("Volume:");
-                ui.add(egui::Slider::new(&mut state.audio_volume, 0.0..=2.0).fixed_decimals(2));
+                ui.add(egui::Slider::new(&mut state.audio.volume, 0.0..=2.0).fixed_decimals(2));
             });
 
             ui.horizontal(|ui| {
                 ui.label("Beats per transition:");
-                ui.add(egui::Slider::new(&mut state.audio_beats, 1..=32));
+                ui.add(egui::Slider::new(&mut state.audio.beats, 1..=32));
             });
             ui.horizontal(|ui| {
                 ui.label("Hold slices:");
-                ui.add(egui::Slider::new(&mut state.audio_hold_slices, 1..=64));
+                ui.add(egui::Slider::new(&mut state.audio.hold_slices, 1..=64));
             });
 
-            ui.checkbox(&mut state.audio_graduated, "Graduated Beats");
+            ui.checkbox(&mut state.audio.graduated, "Graduated Beats");
 
-            if state.audio_graduated {
+            if state.audio.graduated {
                 ui.horizontal(|ui| {
                     ui.label("Semitone range:");
-                    ui.add(egui::Slider::new(&mut state.audio_semitone_range, 1..=24));
+                    ui.add(egui::Slider::new(&mut state.audio.semitone_range, 1..=24));
                 });
             }
 
-            let can_test = state.audio_connected || !state.audio_ports.is_empty();
+            let can_test = state.audio.connected || !state.audio.ports.is_empty();
             ui.add_enabled_ui(can_test, |ui| {
                 if ui.button("Test tone (middle C)").clicked() {
-                    state.pending_audio_request = Some(AudioRequest::TestTone);
+                    state.audio.pending_request = Some(AudioRequest::TestTone);
                 }
             });
 
-            if let Some(status) = &state.audio_status {
+            if let Some(status) = &state.audio.status {
                 ui.separator();
                 ui.label(status);
             }

@@ -364,7 +364,7 @@ impl Renderer {
         let mut app_state = AppState::new();
         app_state.lis_config = lis_config.clone();
         app_state.sync_runtime_snapshot(&dataset, dataset.source_path.clone(), &lis_buffer, 0);
-        app_state.saved_sessions = list_sessions();
+        app_state.session.saved_sessions = list_sessions();
 
         let size = window.inner_size();
         let aspect = size.width as f32 / size.height.max(1) as f32;
@@ -617,44 +617,44 @@ impl Renderer {
 
     fn handle_audio_request(&mut self) {
         #[cfg(feature = "audio")]
-        if let Some(request) = self.app_state.pending_audio_request.take() {
+        if let Some(request) = self.app_state.audio.pending_request.take() {
             match request {
                 lv_gui::state::AudioRequest::RefreshPorts => {
-                    self.app_state.audio_ports = BeatsScheduler::list_ports();
-                    self.app_state.audio_status = Some(format!(
+                    self.app_state.audio.ports = BeatsScheduler::list_ports();
+                    self.app_state.audio.status = Some(format!(
                         "Found {} MIDI output port(s).",
-                        self.app_state.audio_ports.len()
+                        self.app_state.audio.ports.len()
                     ));
-                    if self.app_state.audio_selected_port.is_empty() {
-                        if let Some(first) = self.app_state.audio_ports.first() {
-                            self.app_state.audio_selected_port = first.clone();
+                    if self.app_state.audio.selected_port.is_empty() {
+                        if let Some(first) = self.app_state.audio.ports.first() {
+                            self.app_state.audio.selected_port = first.clone();
                         }
                     }
                 }
                 lv_gui::state::AudioRequest::Connect(port) => {
                     match self.audio_scheduler.connect(&port) {
                         Ok(()) => {
-                            self.app_state.audio_connected = true;
-                            self.app_state.audio_selected_port = port.clone();
-                            self.app_state.audio_status = Some(format!("Connected to '{port}'."));
+                            self.app_state.audio.connected = true;
+                            self.app_state.audio.selected_port = port.clone();
+                            self.app_state.audio.status = Some(format!("Connected to '{port}'."));
                             self.prefs.audio_port = Some(port);
                         }
                         Err(err) => {
-                            self.app_state.audio_connected = false;
-                            self.app_state.audio_status =
+                            self.app_state.audio.connected = false;
+                            self.app_state.audio.status =
                                 Some(format!("Audio connect failed: {err}"));
                         }
                     }
                 }
                 lv_gui::state::AudioRequest::Disconnect => {
                     self.audio_scheduler.disconnect();
-                    self.app_state.audio_connected = false;
+                    self.app_state.audio.connected = false;
                     self.last_audio_frame_index = None;
-                    self.app_state.audio_status = Some("Disconnected MIDI output.".into());
+                    self.app_state.audio.status = Some("Disconnected MIDI output.".into());
                 }
                 lv_gui::state::AudioRequest::TestTone => {
                     let result = self.audio_scheduler.test_tone();
-                    self.app_state.audio_status = Some(match result {
+                    self.app_state.audio.status = Some(match result {
                         Ok(()) => "Played test tone.".into(),
                         Err(err) => format!("Test tone failed: {err}"),
                     });
@@ -665,14 +665,14 @@ impl Renderer {
 
     #[cfg(feature = "audio")]
     fn sync_live_audio(&mut self, frame: &lv_data::LisFrame) {
-        self.audio_scheduler.beats = self.app_state.audio_beats.max(1);
+        self.audio_scheduler.beats = self.app_state.audio.beats.max(1);
         self.audio_scheduler.lis_value = self.lis_config.lis_value.max(2);
-        self.audio_scheduler.hold_slices = self.app_state.audio_hold_slices.max(1);
+        self.audio_scheduler.hold_slices = self.app_state.audio.hold_slices.max(1);
         self.audio_scheduler.velocity =
-            ((self.app_state.audio_volume.clamp(0.0, 2.0) / 2.0) * 127.0).round() as u8;
+            ((self.app_state.audio.volume.clamp(0.0, 2.0) / 2.0) * 127.0).round() as u8;
 
-        let audio_active = self.app_state.audio_connected
-            && self.app_state.audio_live_enabled
+        let audio_active = self.app_state.audio.connected
+            && self.app_state.audio.live_enabled
             && matches!(self.app_state.play_state, PlayState::Playing);
 
         if !audio_active {
@@ -695,13 +695,13 @@ impl Renderer {
 
         if let Some(idx) = self.active_sheet_index(frame.transition_index) {
             let grad_cfg = GraduatedConfig {
-                semitone_range: self.app_state.audio_semitone_range,
+                semitone_range: self.app_state.audio.semitone_range,
                 ..GraduatedConfig::default()
             };
             self.audio_scheduler.on_frame_advance(
                 frame,
                 &self.dataset.sheets[idx].rows,
-                self.app_state.audio_graduated,
+                self.app_state.audio.graduated,
                 &grad_cfg,
             );
             self.last_audio_frame_index = Some(frame.slice_index);
@@ -709,10 +709,10 @@ impl Renderer {
     }
 
     fn handle_session_request(&mut self) {
-        if let Some(request) = self.app_state.pending_session_request.take() {
+        if let Some(request) = self.app_state.session.pending_request.take() {
             let result = match request {
                 lv_gui::state::SessionRequest::RefreshList => {
-                    self.app_state.saved_sessions = list_sessions();
+                    self.app_state.session.saved_sessions = list_sessions();
                     Ok("Session list refreshed.".to_string())
                 }
                 lv_gui::state::SessionRequest::Save(name) => {
@@ -721,35 +721,35 @@ impl Renderer {
                         source_path: self.app_state.source_path().cloned(),
                         lis_config: LisConfigSnapshot::from(&self.lis_config),
                         slice_index: self.slice_index,
-                        cluster_min: self.app_state.cluster_min,
-                        cluster_max: self.app_state.cluster_max,
-                        ego_mode: self.app_state.ego_mode,
+                        cluster_min: self.app_state.cluster.min,
+                        cluster_max: self.app_state.cluster.max,
+                        ego_mode: self.app_state.cluster.ego_mode,
                         ego: EgoSnapshot::from(&self.ego_state),
                         audio: AudioSnapshot {
-                            selected_port: self.app_state.audio_selected_port.clone(),
-                            live_enabled: self.app_state.audio_live_enabled,
-                            volume: self.app_state.audio_volume,
-                            graduated: self.app_state.audio_graduated,
-                            semitone_range: self.app_state.audio_semitone_range,
-                            beats: self.app_state.audio_beats,
-                            hold_slices: self.app_state.audio_hold_slices,
+                            selected_port: self.app_state.audio.selected_port.clone(),
+                            live_enabled: self.app_state.audio.live_enabled,
+                            volume: self.app_state.audio.volume,
+                            graduated: self.app_state.audio.graduated,
+                            semitone_range: self.app_state.audio.semitone_range,
+                            beats: self.app_state.audio.beats,
+                            hold_slices: self.app_state.audio.hold_slices,
                         },
                         export: ExportSnapshot {
-                            output_dir: self.app_state.export_output_dir.clone(),
-                            filename_prefix: self.app_state.export_filename_prefix.clone(),
-                            start_frame: self.app_state.export_start_frame,
-                            end_frame: self.app_state.export_end_frame,
-                            width: self.app_state.export_width,
-                            height: self.app_state.export_height,
-                            format: self.app_state.export_format,
-                            fps: self.app_state.export_fps,
-                            crf: self.app_state.export_crf,
-                            codec: self.app_state.export_codec.clone(),
+                            output_dir: self.app_state.export.output_dir.clone(),
+                            filename_prefix: self.app_state.export.filename_prefix.clone(),
+                            start_frame: self.app_state.export.start_frame,
+                            end_frame: self.app_state.export.end_frame,
+                            width: self.app_state.export.width,
+                            height: self.app_state.export.height,
+                            format: self.app_state.export.format,
+                            fps: self.app_state.export.fps,
+                            crf: self.app_state.export.crf,
+                            codec: self.app_state.export.codec.clone(),
                         },
                     };
                     save_session(&snapshot).map(|_| {
-                        self.app_state.saved_sessions = list_sessions();
-                        self.app_state.session_name = name.clone();
+                        self.app_state.session.saved_sessions = list_sessions();
+                        self.app_state.session.name = name.clone();
                         format!("Saved session '{name}'.")
                     })
                 }
@@ -764,57 +764,57 @@ impl Renderer {
                         self.app_state.lis_config = self.lis_config.clone();
                         self.slice_index = snapshot.slice_index;
                         self.app_state.pending_slice_index = Some(snapshot.slice_index);
-                        self.app_state.cluster_min = snapshot.cluster_min;
-                        self.app_state.cluster_max = snapshot.cluster_max;
-                        self.app_state.ego_mode = snapshot.ego_mode;
+                        self.app_state.cluster.min = snapshot.cluster_min;
+                        self.app_state.cluster.max = snapshot.cluster_max;
+                        self.app_state.cluster.ego_mode = snapshot.ego_mode;
                         self.ego_state = snapshot.ego.into();
-                        self.app_state.ego_direction = self.ego_state.direction;
-                        self.app_state.secondary_edges = self.ego_state.show_secondary;
-                        self.app_state.shared_only = self.ego_state.shared_objects_only;
-                        self.app_state.audio_selected_port = snapshot.audio.selected_port.clone();
-                        self.app_state.audio_live_enabled = snapshot.audio.live_enabled;
-                        self.app_state.audio_volume = snapshot.audio.volume;
-                        self.app_state.audio_graduated = snapshot.audio.graduated;
-                        self.app_state.audio_semitone_range = snapshot.audio.semitone_range;
-                        self.app_state.audio_beats = snapshot.audio.beats;
-                        self.app_state.audio_hold_slices = snapshot.audio.hold_slices;
-                        self.app_state.export_output_dir = snapshot.export.output_dir.clone();
-                        self.app_state.export_filename_prefix = snapshot.export.filename_prefix;
-                        self.app_state.export_start_frame = snapshot.export.start_frame;
-                        self.app_state.export_end_frame = snapshot.export.end_frame;
-                        self.app_state.export_width = snapshot.export.width;
-                        self.app_state.export_height = snapshot.export.height;
-                        self.app_state.export_format = snapshot.export.format;
-                        self.app_state.export_fps = snapshot.export.fps;
-                        self.app_state.export_crf = snapshot.export.crf;
-                        self.app_state.export_codec = snapshot.export.codec;
+                        self.app_state.cluster.ego_direction = self.ego_state.direction;
+                        self.app_state.cluster.secondary_edges = self.ego_state.show_secondary;
+                        self.app_state.cluster.shared_only = self.ego_state.shared_objects_only;
+                        self.app_state.audio.selected_port = snapshot.audio.selected_port.clone();
+                        self.app_state.audio.live_enabled = snapshot.audio.live_enabled;
+                        self.app_state.audio.volume = snapshot.audio.volume;
+                        self.app_state.audio.graduated = snapshot.audio.graduated;
+                        self.app_state.audio.semitone_range = snapshot.audio.semitone_range;
+                        self.app_state.audio.beats = snapshot.audio.beats;
+                        self.app_state.audio.hold_slices = snapshot.audio.hold_slices;
+                        self.app_state.export.output_dir = snapshot.export.output_dir.clone();
+                        self.app_state.export.filename_prefix = snapshot.export.filename_prefix;
+                        self.app_state.export.start_frame = snapshot.export.start_frame;
+                        self.app_state.export.end_frame = snapshot.export.end_frame;
+                        self.app_state.export.width = snapshot.export.width;
+                        self.app_state.export.height = snapshot.export.height;
+                        self.app_state.export.format = snapshot.export.format;
+                        self.app_state.export.fps = snapshot.export.fps;
+                        self.app_state.export.crf = snapshot.export.crf;
+                        self.app_state.export.codec = snapshot.export.codec;
                         #[cfg(feature = "audio")]
-                        if self.app_state.audio_selected_port.is_empty() {
+                        if self.app_state.audio.selected_port.is_empty() {
                             self.audio_scheduler.disconnect();
-                            self.app_state.audio_connected = false;
+                            self.app_state.audio.connected = false;
                             self.last_audio_frame_index = None;
                         } else {
                             match self
                                 .audio_scheduler
-                                .connect(&self.app_state.audio_selected_port)
+                                .connect(&self.app_state.audio.selected_port)
                             {
                                 Ok(()) => {
-                                    self.app_state.audio_connected = true;
+                                    self.app_state.audio.connected = true;
                                 }
                                 Err(err) => {
-                                    self.app_state.audio_connected = false;
-                                    self.app_state.audio_status =
+                                    self.app_state.audio.connected = false;
+                                    self.app_state.audio.status =
                                         Some(format!("Session audio reconnect failed: {err}"));
                                 }
                             }
                         }
                         self.rebuild_lis();
-                        self.app_state.session_name = name.clone();
+                        self.app_state.session.name = name.clone();
                         Ok(format!("Loaded session '{name}'."))
                     })
                 }
             };
-            self.app_state.session_status = Some(match result {
+            self.app_state.session.status = Some(match result {
                 Ok(msg) => msg,
                 Err(err) => format!("Session error: {err:#}"),
             });
@@ -823,9 +823,9 @@ impl Renderer {
 
     #[cfg(feature = "export")]
     fn handle_export_request(&mut self, frame: &lv_data::LisFrame) {
-        if let Some(request) = self.app_state.pending_export_request.take() {
-            if self.app_state.export_job.is_some() {
-                self.app_state.export_status = Some("An export is already running.".into());
+        if let Some(request) = self.app_state.export.pending_request.take() {
+            if self.app_state.export.job.is_some() {
+                self.app_state.export.status = Some("An export is already running.".into());
                 return;
             }
             match request.kind {
@@ -856,7 +856,7 @@ impl Renderer {
                         .and_then(|img| img.save(&path).map_err(anyhow::Error::from));
                     match result {
                         Ok(()) => {
-                            self.app_state.export_status =
+                            self.app_state.export.status =
                                 Some(format!("Saved current frame to {}.", path.display()));
                             self.notifications
                                 .push(notifications::Notification::info(format!(
@@ -865,7 +865,7 @@ impl Renderer {
                                 )));
                         }
                         Err(err) => {
-                            self.app_state.export_status = Some(format!("Export failed: {err:#}"));
+                            self.app_state.export.status = Some(format!("Export failed: {err:#}"));
                         }
                     }
                 }
@@ -975,12 +975,12 @@ impl Renderer {
             let _ = result_tx.send(result);
         });
 
-        self.app_state.export_status = Some(match kind {
+        self.app_state.export.status = Some(match kind {
             lv_gui::state::ExportKind::Sequence => "Started image-sequence export.".into(),
             lv_gui::state::ExportKind::Video => "Started video export.".into(),
             lv_gui::state::ExportKind::CurrentFrame => unreachable!(),
         });
-        self.app_state.export_job = Some(lv_gui::state::ExportJob {
+        self.app_state.export.job = Some(lv_gui::state::ExportJob {
             kind,
             progress: 0.0,
             progress_rx,
@@ -1122,12 +1122,12 @@ impl Renderer {
         self.timer.set_speed(self.lis_config.speed);
 
         // Sync ego state from GUI app_state
-        self.ego_state.cluster_value_min = self.app_state.cluster_min;
-        self.ego_state.cluster_value_max = self.app_state.cluster_max;
-        self.ego_state.show_secondary = self.app_state.secondary_edges;
-        self.ego_state.direction = self.app_state.ego_direction;
-        self.ego_state.shared_objects_only = self.app_state.shared_only;
-        if !self.app_state.ego_mode {
+        self.ego_state.cluster_value_min = self.app_state.cluster.min;
+        self.ego_state.cluster_value_max = self.app_state.cluster.max;
+        self.ego_state.show_secondary = self.app_state.cluster.secondary_edges;
+        self.ego_state.direction = self.app_state.cluster.ego_direction;
+        self.ego_state.shared_objects_only = self.app_state.cluster.shared_only;
+        if !self.app_state.cluster.ego_mode {
             self.ego_state.selected = None;
         }
 
@@ -1196,7 +1196,7 @@ impl Renderer {
 
         // Handle deferred left-click picking
         if let Some(click) = self.last_click_pos.take() {
-            if self.app_state.ego_mode {
+            if self.app_state.cluster.ego_mode {
                 let label_positions = self.frame_label_positions(&frame);
                 let hit = self.pick_object(click, &label_positions);
                 self.ego_state.selected = hit;
@@ -1209,7 +1209,8 @@ impl Renderer {
             .and_then(|idx| self.dataset.sheets.get(idx))
             .map(|sheet| compute_visible_objects(sheet, &self.ego_state));
 
-        let has_ego_selection = self.ego_state.selected.is_some() && self.app_state.ego_mode;
+        let has_ego_selection =
+            self.ego_state.selected.is_some() && self.app_state.cluster.ego_mode;
 
         // Apply alpha based on ego visibility
         let filtered_instances: Vec<GpuInstance> = frame

@@ -26,59 +26,66 @@ impl ClusterFilterPanel {
         };
 
         // Clamp stored range to data range
-        state.cluster_min = state.cluster_min.clamp(data_min, data_max);
-        state.cluster_max = state.cluster_max.clamp(data_min, data_max);
-        if state.cluster_min > state.cluster_max {
-            state.cluster_min = data_min;
-            state.cluster_max = data_max;
+        state.cluster.min = state.cluster.min.clamp(data_min, data_max);
+        state.cluster.max = state.cluster.max.clamp(data_min, data_max);
+        if state.cluster.min > state.cluster.max {
+            state.cluster.min = data_min;
+            state.cluster.max = data_max;
         }
 
         ui.horizontal(|ui| {
             ui.label("Min:");
             ui.add(
-                egui::DragValue::new(&mut state.cluster_min)
+                egui::DragValue::new(&mut state.cluster.min)
                     .speed(0.01)
-                    .range(data_min..=state.cluster_max),
+                    .range(data_min..=state.cluster.max),
             );
             ui.label("Max:");
             ui.add(
-                egui::DragValue::new(&mut state.cluster_max)
+                egui::DragValue::new(&mut state.cluster.max)
                     .speed(0.01)
-                    .range(state.cluster_min..=data_max),
+                    .range(state.cluster.min..=data_max),
             );
         });
 
         if ui.button("Reset Range").clicked() {
-            state.cluster_min = data_min;
-            state.cluster_max = data_max;
+            state.cluster.min = data_min;
+            state.cluster.max = data_max;
         }
 
         ui.separator();
-        ui.checkbox(&mut state.ego_mode, "Show ego cluster");
+        ui.checkbox(&mut state.cluster.ego_mode, "Show ego cluster");
         ui.horizontal(|ui| {
             ui.label("Edge direction:");
             egui::ComboBox::from_id_salt("ego_direction")
-                .selected_text(match state.ego_direction {
+                .selected_text(match state.cluster.ego_direction {
                     EgoEdgeDirection::Incoming => "Incoming",
                     EgoEdgeDirection::Outgoing => "Outgoing",
                     EgoEdgeDirection::Both => "Both",
                 })
                 .show_ui(ui, |ui| {
                     ui.selectable_value(
-                        &mut state.ego_direction,
+                        &mut state.cluster.ego_direction,
                         EgoEdgeDirection::Incoming,
                         "Incoming",
                     );
                     ui.selectable_value(
-                        &mut state.ego_direction,
+                        &mut state.cluster.ego_direction,
                         EgoEdgeDirection::Outgoing,
                         "Outgoing",
                     );
-                    ui.selectable_value(&mut state.ego_direction, EgoEdgeDirection::Both, "Both");
+                    ui.selectable_value(
+                        &mut state.cluster.ego_direction,
+                        EgoEdgeDirection::Both,
+                        "Both",
+                    );
                 });
         });
-        ui.checkbox(&mut state.secondary_edges, "Include secondary edges");
-        ui.checkbox(&mut state.shared_only, "Shared objects only");
+        ui.checkbox(
+            &mut state.cluster.secondary_edges,
+            "Include secondary edges",
+        );
+        ui.checkbox(&mut state.cluster.shared_only, "Shared objects only");
 
         // Object list (filtered)
         if let Some(ds) = state.dataset() {
@@ -87,7 +94,7 @@ impl ClusterFilterPanel {
                 .iter()
                 .flat_map(|s| s.rows.iter())
                 .filter(|r| {
-                    r.cluster_value >= state.cluster_min && r.cluster_value <= state.cluster_max
+                    r.cluster_value >= state.cluster.min && r.cluster_value <= state.cluster.max
                 })
                 .map(|r| r.label.as_str())
                 .collect::<std::collections::HashSet<_>>()

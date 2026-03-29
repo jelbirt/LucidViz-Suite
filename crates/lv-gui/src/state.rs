@@ -121,6 +121,108 @@ pub enum EgoEdgeDirection {
     Both,
 }
 
+/// Grouped export-related state.
+pub struct ExportState {
+    pub pending_request: Option<ExportRequest>,
+    pub job: Option<ExportJob>,
+    pub output_dir: Option<PathBuf>,
+    pub filename_prefix: String,
+    pub start_frame: u32,
+    pub end_frame: u32,
+    pub width: u32,
+    pub height: u32,
+    pub format: ExportImageFormat,
+    pub fps: u32,
+    pub crf: u32,
+    pub codec: String,
+    pub status: Option<String>,
+}
+
+impl Default for ExportState {
+    fn default() -> Self {
+        Self {
+            pending_request: None,
+            job: None,
+            output_dir: None,
+            filename_prefix: "frame".into(),
+            start_frame: 0,
+            end_frame: 0,
+            width: 1920,
+            height: 1080,
+            format: ExportImageFormat::Png,
+            fps: 30,
+            crf: 23,
+            codec: "libx264".into(),
+            status: None,
+        }
+    }
+}
+
+/// Grouped audio-related state.
+pub struct AudioState {
+    pub pending_request: Option<AudioRequest>,
+    pub selected_port: String,
+    pub ports: Vec<String>,
+    pub connected: bool,
+    pub live_enabled: bool,
+    pub volume: f32,
+    pub graduated: bool,
+    pub semitone_range: i32,
+    pub beats: u32,
+    pub hold_slices: u32,
+    pub status: Option<String>,
+}
+
+impl Default for AudioState {
+    fn default() -> Self {
+        Self {
+            pending_request: None,
+            selected_port: String::new(),
+            ports: Vec::new(),
+            connected: false,
+            live_enabled: false,
+            volume: 1.0,
+            graduated: false,
+            semitone_range: 12,
+            beats: 1,
+            hold_slices: 2,
+            status: None,
+        }
+    }
+}
+
+/// Grouped session-related state.
+#[derive(Default)]
+pub struct SessionState {
+    pub pending_request: Option<SessionRequest>,
+    pub name: String,
+    pub saved_sessions: Vec<String>,
+    pub status: Option<String>,
+}
+
+/// Grouped cluster-filter state.
+pub struct ClusterState {
+    pub min: f64,
+    pub max: f64,
+    pub ego_mode: bool,
+    pub ego_direction: EgoEdgeDirection,
+    pub secondary_edges: bool,
+    pub shared_only: bool,
+}
+
+impl Default for ClusterState {
+    fn default() -> Self {
+        Self {
+            min: f64::NEG_INFINITY,
+            max: f64::INFINITY,
+            ego_mode: false,
+            ego_direction: EgoEdgeDirection::Both,
+            secondary_edges: false,
+            shared_only: false,
+        }
+    }
+}
+
 /// The full mutable application state shared between the GUI and renderer.
 pub struct AppState {
     // ── Runtime snapshot (renderer-owned, GUI-read-only) ───────────────────
@@ -137,46 +239,14 @@ pub struct AppState {
     pub pending_slice_index: Option<u32>,
     pub play_state: PlayState,
 
-    // ── Runtime integration requests ────────────────────────────────────────
-    pub pending_export_request: Option<ExportRequest>,
-    pub export_job: Option<ExportJob>,
-    pub export_output_dir: Option<PathBuf>,
-    pub export_filename_prefix: String,
-    pub export_start_frame: u32,
-    pub export_end_frame: u32,
-    pub export_width: u32,
-    pub export_height: u32,
-    pub export_format: ExportImageFormat,
-    pub export_fps: u32,
-    pub export_crf: u32,
-    pub export_codec: String,
-    pub export_status: Option<String>,
-    pub pending_audio_request: Option<AudioRequest>,
-    pub audio_selected_port: String,
-    pub audio_ports: Vec<String>,
-    pub audio_connected: bool,
-    pub audio_live_enabled: bool,
-    pub audio_volume: f32,
-    pub audio_graduated: bool,
-    pub audio_semitone_range: i32,
-    pub audio_beats: u32,
-    pub audio_hold_slices: u32,
-    pub audio_status: Option<String>,
-    pub pending_session_request: Option<SessionRequest>,
-    pub session_name: String,
-    pub saved_sessions: Vec<String>,
-    pub session_status: Option<String>,
+    // ── Grouped sub-states ──────────────────────────────────────────────────
+    pub export: ExportState,
+    pub audio: AudioState,
+    pub session: SessionState,
+    pub cluster: ClusterState,
 
     // ── Overrides ────────────────────────────────────────────────────────────
     pub overrides: HashMap<String, ObjectOverride>,
-
-    // ── Cluster filter ───────────────────────────────────────────────────────
-    pub cluster_min: f64,
-    pub cluster_max: f64,
-    pub ego_mode: bool,
-    pub ego_direction: EgoEdgeDirection,
-    pub secondary_edges: bool,
-    pub shared_only: bool,
 
     // ── Dirty flags ─────────────────────────────────────────────────────────
     /// Set to true when the LIS buffer must be rebuilt (LIS value changed etc.)
@@ -216,41 +286,11 @@ impl AppState {
             lis_config: LisConfig::default(),
             pending_slice_index: None,
             play_state: PlayState::Playing,
-            pending_export_request: None,
-            export_job: None,
-            export_output_dir: None,
-            export_filename_prefix: "frame".into(),
-            export_start_frame: 0,
-            export_end_frame: 0,
-            export_width: 1920,
-            export_height: 1080,
-            export_format: ExportImageFormat::Png,
-            export_fps: 30,
-            export_crf: 23,
-            export_codec: "libx264".into(),
-            export_status: None,
-            pending_audio_request: None,
-            audio_selected_port: String::new(),
-            audio_ports: Vec::new(),
-            audio_connected: false,
-            audio_live_enabled: false,
-            audio_volume: 1.0,
-            audio_graduated: false,
-            audio_semitone_range: 12,
-            audio_beats: 1,
-            audio_hold_slices: 2,
-            audio_status: None,
-            pending_session_request: None,
-            session_name: String::new(),
-            saved_sessions: Vec::new(),
-            session_status: None,
+            export: ExportState::default(),
+            audio: AudioState::default(),
+            session: SessionState::default(),
+            cluster: ClusterState::default(),
             overrides: HashMap::new(),
-            cluster_min: f64::NEG_INFINITY,
-            cluster_max: f64::INFINITY,
-            ego_mode: false,
-            ego_direction: EgoEdgeDirection::Both,
-            secondary_edges: false,
-            shared_only: false,
             rebuild_lis: false,
             load_error: None,
             as_job: None,
@@ -322,12 +362,12 @@ impl AppState {
 
     pub fn poll_export_job(&mut self) {
         let mut finished = false;
-        if let Some(job) = self.export_job.as_mut() {
+        if let Some(job) = self.export.job.as_mut() {
             while let Ok(progress) = job.progress_rx.try_recv() {
                 job.progress = progress;
             }
             while let Ok(result) = job.result_rx.try_recv() {
-                self.export_status = Some(match result {
+                self.export.status = Some(match result {
                     Ok(msg) => msg,
                     Err(err) => format!("Export failed: {err}"),
                 });
@@ -335,7 +375,7 @@ impl AppState {
             }
         }
         if finished {
-            self.export_job = None;
+            self.export.job = None;
         }
     }
 }
@@ -414,5 +454,48 @@ mod tests {
         assert_eq!(state.slice_index(), 2);
         assert!(state.pending_dataset_load.is_some());
         assert_eq!(state.pending_slice_index, Some(0));
+    }
+
+    #[test]
+    fn export_state_defaults_are_sane() {
+        use super::ExportState;
+        let export = ExportState::default();
+        assert_eq!(export.width, 1920);
+        assert_eq!(export.height, 1080);
+        assert_eq!(export.fps, 30);
+        assert_eq!(export.crf, 23);
+        assert_eq!(export.codec, "libx264");
+        assert!(export.job.is_none());
+        assert!(export.pending_request.is_none());
+    }
+
+    #[test]
+    fn audio_state_defaults_are_sane() {
+        use super::AudioState;
+        let audio = AudioState::default();
+        assert_eq!(audio.volume, 1.0);
+        assert!(!audio.connected);
+        assert!(!audio.live_enabled);
+        assert_eq!(audio.semitone_range, 12);
+        assert!(audio.ports.is_empty());
+    }
+
+    #[test]
+    fn cluster_state_defaults_allow_all_values() {
+        use super::ClusterState;
+        let cluster = ClusterState::default();
+        assert!(cluster.min.is_infinite() && cluster.min < 0.0);
+        assert!(cluster.max.is_infinite() && cluster.max > 0.0);
+        assert!(!cluster.ego_mode);
+        assert!(!cluster.shared_only);
+    }
+
+    #[test]
+    fn session_state_defaults_are_empty() {
+        use super::SessionState;
+        let session = SessionState::default();
+        assert!(session.name.is_empty());
+        assert!(session.saved_sessions.is_empty());
+        assert!(session.status.is_none());
     }
 }
