@@ -125,8 +125,7 @@ pub fn compute_visible_objects(sheet: &EtvSheet, state: &EgoClusterState) -> Has
         let neighbor_map: HashMap<&str, HashSet<String>> = filtered
             .iter()
             .map(|label| {
-                let neighbors =
-                    directional_neighbors(sheet, label, state.direction, &filtered);
+                let neighbors = directional_neighbors(sheet, label, state.direction, &filtered);
                 (label.as_str(), neighbors)
             })
             .collect();

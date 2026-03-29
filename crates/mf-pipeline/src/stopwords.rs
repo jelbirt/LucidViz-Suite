@@ -23,8 +23,7 @@ pub fn filter_stopwords(tokens: Vec<Token>, language: &str) -> Vec<Token> {
             .entry(language.to_string())
             .or_insert_with(|| {
                 let owned_lang = language.to_string();
-                let result =
-                    std::panic::catch_unwind(move || stop_words::get(&owned_lang));
+                let result = std::panic::catch_unwind(move || stop_words::get(&owned_lang));
                 match result {
                     Ok(list) if !list.is_empty() => {
                         Some(list.iter().map(|s| s.to_string()).collect())
