@@ -1,9 +1,9 @@
 use criterion::{criterion_group, criterion_main, Criterion};
-use std::hint::black_box;
 use lv_data::{EtvDataset, EtvRow, EtvSheet, LisConfig, ShapeKind};
 use lv_renderer::lis::{build_lis_buffer, compute_frame};
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
+use std::hint::black_box;
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 

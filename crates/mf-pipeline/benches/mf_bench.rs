@@ -1,5 +1,4 @@
 use criterion::{criterion_group, criterion_main, Criterion};
-use std::hint::black_box;
 use mf_pipeline::{
     centrality::compute_betweenness_pg,
     cooccurrence::build_cooccurrence,
@@ -7,6 +6,7 @@ use mf_pipeline::{
 };
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
+use std::hint::black_box;
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 
