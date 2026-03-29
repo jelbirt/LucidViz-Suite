@@ -35,7 +35,7 @@ ndarray  = "0.16"   # pinned; 0.17 has breaking API changes vs nalgebra compat l
 rayon    = "1.10"
 
 # Graph
-petgraph = "0.6"
+petgraph = "0.8"
 
 # Text / NLP
 unicode-normalization = "0.1"
