@@ -7,6 +7,7 @@ pub enum DataError {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
+    #[cfg(feature = "native-io")]
     #[error("XLSX read error: {0}")]
     XlsxRead(#[from] calamine::Error),
 
