@@ -284,4 +284,121 @@ mod tests {
         assert_eq!(frame.labels, vec!["sphere", "cube"]);
         assert_eq!(frame.instances.len(), frame.labels.len());
     }
+
+    fn make_two_sheet_dataset() -> EtvDataset {
+        let sheet_a = EtvSheet {
+            name: "T0".into(),
+            sheet_index: 0,
+            rows: vec![EtvRow {
+                label: "node".into(),
+                shape: ShapeKind::Sphere,
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+                size: 2.0,
+                ..Default::default()
+            }],
+            edges: vec![],
+        };
+        let sheet_b = EtvSheet {
+            name: "T1".into(),
+            sheet_index: 1,
+            rows: vec![EtvRow {
+                label: "node".into(),
+                shape: ShapeKind::Sphere,
+                x: 10.0,
+                y: 20.0,
+                z: 30.0,
+                size: 4.0,
+                ..Default::default()
+            }],
+            edges: vec![],
+        };
+        EtvDataset {
+            source_path: None,
+            sheets: vec![sheet_a, sheet_b],
+            all_labels: vec!["node".into()],
+        }
+    }
+
+    fn lis4() -> LisConfig {
+        LisConfig {
+            lis_value: 4,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn interpolate_at_alpha_zero_returns_source_position() {
+        let ds = make_two_sheet_dataset();
+        let frame = compute_frame(&ds, &lis4(), 0);
+        let inst = &frame.instances[0];
+        assert_eq!(inst.position, [0.0, 0.0, 0.0]);
+        assert!((inst.size - 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn interpolate_at_alpha_half_returns_midpoint() {
+        let ds = make_two_sheet_dataset();
+        // lis_value=4, frame 2 => alpha = 2/4 = 0.5
+        let frame = compute_frame(&ds, &lis4(), 2);
+        let inst = &frame.instances[0];
+        assert!(
+            (inst.position[0] - 5.0).abs() < 1e-6,
+            "x midpoint: {}",
+            inst.position[0]
+        );
+        assert!(
+            (inst.position[1] - 10.0).abs() < 1e-6,
+            "y midpoint: {}",
+            inst.position[1]
+        );
+        assert!(
+            (inst.position[2] - 15.0).abs() < 1e-6,
+            "z midpoint: {}",
+            inst.position[2]
+        );
+        assert!(
+            (inst.size - 3.0).abs() < 1e-6,
+            "size midpoint: {}",
+            inst.size
+        );
+    }
+
+    #[test]
+    fn fade_in_interpolation_starts_at_zero_size() {
+        // Node exists only in sheet B, so at alpha=0 it should fade in from size=0
+        let sheet_a = EtvSheet {
+            name: "T0".into(),
+            sheet_index: 0,
+            rows: vec![],
+            edges: vec![],
+        };
+        let sheet_b = EtvSheet {
+            name: "T1".into(),
+            sheet_index: 1,
+            rows: vec![EtvRow {
+                label: "appearing".into(),
+                shape: ShapeKind::Cube,
+                x: 5.0,
+                y: 5.0,
+                z: 5.0,
+                size: 2.0,
+                ..Default::default()
+            }],
+            edges: vec![],
+        };
+        let ds = EtvDataset {
+            source_path: None,
+            sheets: vec![sheet_a, sheet_b],
+            all_labels: vec!["appearing".into()],
+        };
+        // frame 0 => alpha=0.0, node is absent in T0 so fade-in from size=0
+        let frame = compute_frame(&ds, &lis4(), 0);
+        let inst = &frame.instances[0];
+        assert!(
+            (inst.size - 0.0).abs() < 1e-6,
+            "fade-in at alpha=0 should have size 0"
+        );
+    }
 }

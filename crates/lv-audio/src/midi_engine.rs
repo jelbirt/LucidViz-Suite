@@ -169,3 +169,55 @@ mod inner {
 }
 
 pub use inner::MidiEngine;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stub_engine_returns_empty_ports() {
+        let ports = MidiEngine::list_ports();
+        // Without the midi feature, port list should be empty
+        #[cfg(not(feature = "midi"))]
+        assert!(ports.is_empty());
+        // With the midi feature, we just check it doesn't panic
+        let _ = ports;
+    }
+
+    #[test]
+    fn stub_engine_note_on_off_are_noop() {
+        let mut engine = MidiEngine::new();
+        // note_on and note_off should succeed silently on the stub
+        let on_result = engine.note_on(0, 60, 100, 0);
+        #[cfg(not(feature = "midi"))]
+        assert!(on_result.is_ok());
+        let _ = on_result;
+
+        let off_result = engine.note_off(0, 60);
+        #[cfg(not(feature = "midi"))]
+        assert!(off_result.is_ok());
+        let _ = off_result;
+    }
+
+    #[test]
+    fn stub_engine_connect_returns_not_available() {
+        let mut engine = MidiEngine::new();
+        let result = engine.connect("nonexistent_port");
+        #[cfg(not(feature = "midi"))]
+        assert!(matches!(result, Err(MidiError::NotAvailable)));
+        // With midi feature, it would return PortNotFound
+        let _ = result;
+    }
+
+    #[test]
+    fn stub_engine_all_notes_off_does_not_panic() {
+        let mut engine = MidiEngine::new();
+        engine.all_notes_off(); // should not panic
+    }
+
+    #[test]
+    fn stub_engine_disconnect_does_not_panic() {
+        let engine = MidiEngine::new();
+        engine.disconnect(); // should not panic
+    }
+}
