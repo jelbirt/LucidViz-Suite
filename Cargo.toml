@@ -62,7 +62,7 @@ thiserror = "2.0"
 pollster  = "0.3"
 sha2      = "0.10"
 rfd       = "0.17"
-rand      = { version = "0.8", features = ["small_rng"] }
+rand      = { version = "0.9", features = ["small_rng"] }
 getrandom = { version = "0.2" }
 dirs-next = "2.0"
 tempfile  = "3"
