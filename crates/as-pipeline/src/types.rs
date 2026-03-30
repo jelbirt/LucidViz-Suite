@@ -168,7 +168,7 @@ pub enum CentralityState {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum MdsConfig {
-    /// Auto-select: Classical for n<500, PivotMds otherwise.
+    /// Auto-select: Classical for n<800, PivotMds (with scaled pivot count) otherwise.
     Auto,
     Classical,
     Smacof(SmacofConfig),

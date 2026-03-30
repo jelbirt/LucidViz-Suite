@@ -86,12 +86,33 @@ pub fn compute_centrality(
     let betweenness =
         parallel_brandes_betweenness(&weighted_adj, n, matches!(mode, CentralityMode::Directed));
 
+    // Harmonic centrality: H(v) = (1/(n-1)) * sum_{u!=v} 1/d(v,u)
+    let harmonic: Vec<f64> = (0..n)
+        .map(|i| {
+            if n <= 1 {
+                return 0.0;
+            }
+            let sum: f64 = dist_matrix[i]
+                .iter()
+                .enumerate()
+                .filter(|(j, &d)| *j != i && d.is_finite() && d > 0.0)
+                .map(|(_, &d)| 1.0 / d)
+                .sum();
+            sum / (n - 1) as f64
+        })
+        .collect();
+
+    // Eigenvector centrality via power iteration on the adjacency matrix.
+    let eigenvector = eigenvector_centrality(adj, n);
+
     Ok(CentralityReport {
         labels: labels.to_vec(),
         degree,
         distance,
         closeness,
         betweenness,
+        harmonic,
+        eigenvector,
     })
 }
 
@@ -208,13 +229,89 @@ fn shortest_paths_from(weighted_adj: &[Vec<(usize, f64)>], s: usize) -> Vec<f64>
     dist
 }
 
+/// Eigenvector centrality via power iteration.
+///
+/// Returns the dominant eigenvector of the adjacency matrix, normalized so
+/// the maximum component is 1.0. For disconnected graphs, nodes in
+/// non-dominant components will have zero centrality.
+fn eigenvector_centrality(adj: &Array2<f64>, n: usize) -> Vec<f64> {
+    if n == 0 {
+        return vec![];
+    }
+    if n == 1 {
+        return vec![1.0];
+    }
+
+    let max_iter = 100;
+    let tol = 1e-10;
+
+    // Initialize with uniform vector.
+    let mut x = vec![1.0 / (n as f64).sqrt(); n];
+
+    for _ in 0..max_iter {
+        // Matrix-vector product: y = A * x
+        let mut y = vec![0.0f64; n];
+        for i in 0..n {
+            let mut sum = 0.0;
+            for j in 0..n {
+                sum += adj[[i, j]] * x[j];
+            }
+            y[i] = sum;
+        }
+
+        // Normalize by L2 norm.
+        let norm: f64 = y.iter().map(|v| v * v).sum::<f64>().sqrt();
+        if norm < 1e-15 {
+            return vec![0.0; n];
+        }
+        for v in &mut y {
+            *v /= norm;
+        }
+
+        // Check convergence.
+        let delta: f64 = x.iter().zip(y.iter()).map(|(a, b)| (a - b).abs()).sum();
+        x = y;
+        if delta < tol {
+            break;
+        }
+    }
+
+    // Normalize so max = 1.0.
+    let max_val = x.iter().cloned().fold(0.0f64, f64::max);
+    if max_val > 1e-15 {
+        for v in &mut x {
+            *v /= max_val;
+        }
+    }
+
+    x
+}
+
+/// Threshold above which approximate betweenness is used.
+const APPROX_BETWEENNESS_THRESHOLD: usize = 1000;
+/// Number of pivot sources for approximate betweenness.
+const APPROX_BETWEENNESS_PIVOTS: usize = 100;
+
 /// Parallel Brandes betweenness centrality for a weighted graph.
+/// For n > 1000, uses approximate betweenness with 100 pivot sources
+/// (Brandes & Pich 2007) to avoid O(n^2) scaling.
 fn parallel_brandes_betweenness(
     weighted_adj: &[Vec<(usize, f64)>],
     n: usize,
     directed: bool,
 ) -> Vec<f64> {
-    let partials: Vec<Vec<f64>> = (0..n)
+    let (sources, scale_factor): (Vec<usize>, f64) = if n > APPROX_BETWEENNESS_THRESHOLD {
+        // Sample pivots evenly across nodes.
+        let k = APPROX_BETWEENNESS_PIVOTS.min(n);
+        let step = n as f64 / k as f64;
+        let pivots: Vec<usize> = (0..k).map(|i| (i as f64 * step) as usize).collect();
+        let factor = n as f64 / k as f64;
+        (pivots, factor)
+    } else {
+        ((0..n).collect(), 1.0)
+    };
+
+    let partials: Vec<Vec<f64>> = sources
         .into_par_iter()
         .map(|s| brandes_source(weighted_adj, n, s))
         .collect();
@@ -224,6 +321,11 @@ fn parallel_brandes_betweenness(
         for i in 0..n {
             between[i] += partial[i];
         }
+    }
+
+    // Scale up if using approximate (sampled) betweenness.
+    for b in &mut between {
+        *b *= scale_factor;
     }
 
     let norm = if n > 2 {
@@ -403,6 +505,65 @@ mod tests {
         assert_eq!(report.degree, vec![0.0]);
         assert_eq!(report.distance, vec![0.0]);
         assert_eq!(report.closeness, vec![0.0]);
+    }
+
+    #[test]
+    fn test_harmonic_centrality_computed() {
+        let n = 3;
+        let mut adj = Array2::<f64>::ones((n, n));
+        for i in 0..n {
+            adj[[i, i]] = 0.0;
+        }
+        let report = compute_centrality(&adj, &labels(n), CentralityMode::UndirectedLegacy)
+            .expect("centrality should compute");
+        assert_eq!(report.harmonic.len(), n);
+        for &h in &report.harmonic {
+            assert!(h > 0.0, "harmonic should be positive for connected graph");
+        }
+    }
+
+    #[test]
+    fn test_eigenvector_centrality_complete_graph() {
+        let n = 4;
+        let mut adj = Array2::<f64>::ones((n, n));
+        for i in 0..n {
+            adj[[i, i]] = 0.0;
+        }
+        let report = compute_centrality(&adj, &labels(n), CentralityMode::UndirectedLegacy)
+            .expect("centrality should compute");
+        assert_eq!(report.eigenvector.len(), n);
+        // Complete graph: all nodes should have equal eigenvector centrality.
+        let max_val = report.eigenvector.iter().cloned().fold(0.0f64, f64::max);
+        assert!(
+            (max_val - 1.0).abs() < 1e-6,
+            "max eigenvector should be 1.0"
+        );
+        for &e in &report.eigenvector {
+            assert!(
+                (e - 1.0).abs() < 1e-6,
+                "all nodes in complete graph should have equal eigenvector centrality"
+            );
+        }
+    }
+
+    #[test]
+    fn test_eigenvector_star_graph() {
+        // Star graph: center (node 0) connected to all others.
+        let n = 5;
+        let mut adj = Array2::<f64>::zeros((n, n));
+        for i in 1..n {
+            adj[[0, i]] = 1.0;
+            adj[[i, 0]] = 1.0;
+        }
+        let report = compute_centrality(&adj, &labels(n), CentralityMode::UndirectedLegacy)
+            .expect("centrality should compute");
+        // Center should have highest eigenvector centrality.
+        assert!(
+            report.eigenvector[0] >= report.eigenvector[1],
+            "center should dominate: {} vs {}",
+            report.eigenvector[0],
+            report.eigenvector[1]
+        );
     }
 
     #[test]

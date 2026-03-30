@@ -792,6 +792,8 @@ mod tests {
                 distance: vec![0.0; 2],
                 closeness: vec![0.0; 2],
                 betweenness: vec![0.0; 2],
+                harmonic: vec![0.0; 2],
+                eigenvector: vec![0.0; 2],
             },
         };
 
@@ -906,6 +908,8 @@ mod tests {
                 distance: vec![0.0; 2],
                 closeness: vec![0.0; 2],
                 betweenness: vec![0.0; 2],
+                harmonic: vec![0.0; 2],
+                eigenvector: vec![0.0; 2],
             },
         };
 

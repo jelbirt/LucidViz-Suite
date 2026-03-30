@@ -11,7 +11,8 @@ use crate::types::{DistanceMatrix, MdsConfig, MdsCoordinates, MdsDimMode};
 
 /// Run MDS on a distance matrix, selecting the algorithm from `cfg`.
 ///
-/// `MdsConfig::Auto` selects Classical MDS for n<500, PivotMds otherwise.
+/// `MdsConfig::Auto` selects Classical MDS for n<800, PivotMds otherwise.
+/// Pivot count scales as max(50, sqrt(n)), capped at 200.
 pub fn run_mds(
     dist: &DistanceMatrix,
     cfg: &MdsConfig,
@@ -25,10 +26,10 @@ pub fn run_mds(
 
     match cfg {
         MdsConfig::Auto => {
-            if n < 500 {
+            if n < 800 {
                 classical::classical_mds(dist, dims)
             } else {
-                let n_pivots = 50.min(n);
+                let n_pivots = auto_pivot_count(n);
                 pivot::pivot_mds(dist, dims, n_pivots)
             }
         }
@@ -36,6 +37,12 @@ pub fn run_mds(
         MdsConfig::Smacof(smacof_cfg) => smacof::smacof(dist, dims, smacof_cfg),
         MdsConfig::PivotMds { n_pivots } => pivot::pivot_mds(dist, dims, *n_pivots),
     }
+}
+
+/// Auto-select pivot count: max(50, sqrt(n)), capped at 200.
+fn auto_pivot_count(n: usize) -> usize {
+    let sqrt_n = (n as f64).sqrt() as usize;
+    sqrt_n.clamp(50, 200).min(n)
 }
 
 fn resolve_dims(mode: MdsDimMode, n: usize) -> usize {

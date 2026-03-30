@@ -5,6 +5,8 @@
 
 use std::collections::HashMap;
 
+use rayon::prelude::*;
+
 use lv_data::{GpuInstance, LisBuffer, LisConfig, LisFrame, LvDataset, LvRow, LvSheet};
 
 const STREAM_THRESHOLD_BYTES: usize = 100 * 1024 * 1024; // 100 MB
@@ -46,30 +48,35 @@ pub fn build_lis_buffer(dataset: &LvDataset, config: &LisConfig) -> LisBuffer {
 
     let indexed_sheets: Vec<HashMap<&str, &LvRow>> =
         dataset.sheets.iter().map(index_sheet_rows).collect();
-    let mut frames: Vec<LisFrame> = Vec::new();
     let transitions = if time_pts > 1 { time_pts - 1 } else { 1 };
 
-    for t in 0..transitions {
-        let rows_a = &indexed_sheets[t];
-        let rows_b = if t + 1 < indexed_sheets.len() {
-            &indexed_sheets[t + 1]
-        } else {
-            rows_a
-        };
+    // Parallelize across transitions: each transition's frames are independent.
+    let frames: Vec<LisFrame> = (0..transitions)
+        .into_par_iter()
+        .flat_map(|t| {
+            let rows_a = &indexed_sheets[t];
+            let rows_b = if t + 1 < indexed_sheets.len() {
+                &indexed_sheets[t + 1]
+            } else {
+                rows_a
+            };
 
-        for k in 0..lis {
-            let alpha = k as f64 / lis as f64;
-            frames.push(build_frame(
-                dataset,
-                rows_a,
-                rows_b,
-                alpha,
-                t as u32 * lis + k,
-                t as u32,
-                k,
-            ));
-        }
-    }
+            (0..lis)
+                .map(|k| {
+                    let alpha = k as f64 / lis as f64;
+                    build_frame(
+                        dataset,
+                        rows_a,
+                        rows_b,
+                        alpha,
+                        t as u32 * lis + k,
+                        t as u32,
+                        k,
+                    )
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
 
     let total_frames = frames.len() as u32;
     LisBuffer {

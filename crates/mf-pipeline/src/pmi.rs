@@ -2,6 +2,8 @@
 //!
 //! All matrices are symmetric, n×n, row-major.
 
+use rayon::prelude::*;
+
 use crate::types::CooccurrenceGraph;
 
 const EPSILON: f64 = 1e-10;
@@ -36,35 +38,44 @@ pub fn compute_pmi(graph: &CooccurrenceGraph) -> Vec<f64> {
         .map(|i| (0..n).map(|j| mat[i * n + j] as f64).sum::<f64>())
         .collect();
 
+    // Parallelize row-wise: each row computes its upper-triangle slice.
+    let rows: Vec<Vec<(usize, f64)>> = (0..n)
+        .into_par_iter()
+        .map(|i| {
+            let mut row_vals = Vec::new();
+            for j in i..n {
+                let count_ij = mat[i * n + j] as f64;
+                if count_ij < EPSILON {
+                    continue;
+                }
+
+                let p_ab = count_ij / (total * 2.0);
+                let p_a = row_sums[i] / (total * 2.0);
+                let p_b = row_sums[j] / (total * 2.0);
+
+                if p_a < EPSILON || p_b < EPSILON {
+                    continue;
+                }
+
+                let pmi = (p_ab / (p_a * p_b)).log2();
+                let ppmi = pmi.max(0.0);
+
+                let neg_log_p_ab = -p_ab.log2();
+                let nppmi = if neg_log_p_ab > EPSILON {
+                    (ppmi / neg_log_p_ab).min(1.0)
+                } else {
+                    0.0
+                };
+
+                row_vals.push((j, nppmi));
+            }
+            row_vals
+        })
+        .collect();
+
     let mut out = vec![0.0f64; n * n];
-
-    for i in 0..n {
-        for j in i..n {
-            let count_ij = mat[i * n + j] as f64;
-            if count_ij < EPSILON {
-                // PPMI = 0
-                continue;
-            }
-
-            let p_ab = count_ij / (total * 2.0); // each direction counted once in row_sum
-            let p_a = row_sums[i] / (total * 2.0);
-            let p_b = row_sums[j] / (total * 2.0);
-
-            if p_a < EPSILON || p_b < EPSILON {
-                continue;
-            }
-
-            let pmi = (p_ab / (p_a * p_b)).log2();
-            let ppmi = pmi.max(0.0);
-
-            // Normalise: nppmi = ppmi / max(-log2(p_ab), epsilon)
-            let neg_log_p_ab = -p_ab.log2();
-            let nppmi = if neg_log_p_ab > EPSILON {
-                (ppmi / neg_log_p_ab).min(1.0)
-            } else {
-                0.0
-            };
-
+    for (i, row_vals) in rows.into_iter().enumerate() {
+        for (j, nppmi) in row_vals {
             out[i * n + j] = nppmi;
             out[j * n + i] = nppmi;
         }
@@ -109,26 +120,36 @@ pub fn compute_ppmi(graph: &CooccurrenceGraph) -> Vec<f64> {
         .map(|i| (0..n).map(|j| mat[i * n + j] as f64).sum::<f64>())
         .collect();
 
+    let rows: Vec<Vec<(usize, f64)>> = (0..n)
+        .into_par_iter()
+        .map(|i| {
+            let mut row_vals = Vec::new();
+            for j in i..n {
+                let count_ij = mat[i * n + j] as f64;
+                if count_ij < EPSILON {
+                    continue;
+                }
+
+                let p_ab = count_ij / (total * 2.0);
+                let p_a = row_sums[i] / (total * 2.0);
+                let p_b = row_sums[j] / (total * 2.0);
+
+                if p_a < EPSILON || p_b < EPSILON {
+                    continue;
+                }
+
+                let pmi = (p_ab / (p_a * p_b)).log2();
+                let ppmi = pmi.max(0.0);
+
+                row_vals.push((j, ppmi));
+            }
+            row_vals
+        })
+        .collect();
+
     let mut out = vec![0.0f64; n * n];
-
-    for i in 0..n {
-        for j in i..n {
-            let count_ij = mat[i * n + j] as f64;
-            if count_ij < EPSILON {
-                continue;
-            }
-
-            let p_ab = count_ij / (total * 2.0);
-            let p_a = row_sums[i] / (total * 2.0);
-            let p_b = row_sums[j] / (total * 2.0);
-
-            if p_a < EPSILON || p_b < EPSILON {
-                continue;
-            }
-
-            let pmi = (p_ab / (p_a * p_b)).log2();
-            let ppmi = pmi.max(0.0);
-
+    for (i, row_vals) in rows.into_iter().enumerate() {
+        for (j, ppmi) in row_vals {
             out[i * n + j] = ppmi;
             out[j * n + i] = ppmi;
         }

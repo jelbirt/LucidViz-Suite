@@ -297,6 +297,8 @@ mod tests {
             distance: vec![0.0; labels.len()],
             closeness: vec![0.0; labels.len()],
             betweenness: vec![0.0; labels.len()],
+            harmonic: vec![0.0; labels.len()],
+            eigenvector: vec![0.0; labels.len()],
         }
     }
 

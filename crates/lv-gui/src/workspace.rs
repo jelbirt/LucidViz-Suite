@@ -204,6 +204,8 @@ mod tests {
                 distance: vec![0.0],
                 closeness: vec![0.0],
                 betweenness: vec![0.0],
+                harmonic: vec![0.0],
+                eigenvector: vec![0.0],
             },
         });
         state.mf_series_output = Some(MfSeriesOutput {

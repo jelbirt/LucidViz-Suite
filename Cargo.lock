@@ -2136,6 +2136,7 @@ dependencies = [
  "nalgebra",
  "pollster 0.3.0",
  "rand",
+ "rayon",
  "serde",
  "sha2",
  "toml 0.8.23",

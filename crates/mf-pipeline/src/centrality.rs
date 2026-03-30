@@ -205,13 +205,86 @@ pub fn compute_centrality_full(pg: &UnGraph<String, f64>, labels: &[String]) -> 
 
     let betweenness = compute_betweenness_pg(pg);
 
+    // Harmonic centrality.
+    let harmonic: Vec<f64> = (0..n)
+        .map(|i| {
+            if n <= 1 {
+                return 0.0;
+            }
+            let sum: f64 = dist_matrix[i]
+                .iter()
+                .enumerate()
+                .filter(|(j, &d)| *j != i && d.is_finite() && d > 0.0)
+                .map(|(_, &d)| 1.0 / d)
+                .sum();
+            sum / (n - 1) as f64
+        })
+        .collect();
+
+    // Eigenvector centrality via power iteration on adjacency weights.
+    let eigenvector = eigenvector_centrality_pg(pg, n, &nodes);
+
     CentralityReport {
         labels: labels.to_vec(),
         degree,
         distance,
         closeness,
         betweenness,
+        harmonic,
+        eigenvector,
     }
+}
+
+/// Eigenvector centrality via power iteration on the petgraph adjacency.
+fn eigenvector_centrality_pg(pg: &UnGraph<String, f64>, n: usize, nodes: &[NodeIndex]) -> Vec<f64> {
+    if n == 0 {
+        return vec![];
+    }
+    if n == 1 {
+        return vec![1.0];
+    }
+
+    let idx_map: std::collections::HashMap<NodeIndex, usize> =
+        nodes.iter().enumerate().map(|(i, &ni)| (ni, i)).collect();
+
+    let max_iter = 100;
+    let tol = 1e-10;
+    let mut x = vec![1.0 / (n as f64).sqrt(); n];
+
+    for _ in 0..max_iter {
+        let mut y = vec![0.0f64; n];
+        for (i, &ni) in nodes.iter().enumerate() {
+            let mut sum = 0.0;
+            for edge in pg.edges(ni) {
+                if let Some(&j) = idx_map.get(&edge.target()) {
+                    sum += edge.weight() * x[j];
+                }
+            }
+            y[i] = sum;
+        }
+
+        let norm: f64 = y.iter().map(|v| v * v).sum::<f64>().sqrt();
+        if norm < 1e-15 {
+            return vec![0.0; n];
+        }
+        for v in &mut y {
+            *v /= norm;
+        }
+
+        let delta: f64 = x.iter().zip(y.iter()).map(|(a, b)| (a - b).abs()).sum();
+        x = y;
+        if delta < tol {
+            break;
+        }
+    }
+
+    let max_val = x.iter().cloned().fold(0.0f64, f64::max);
+    if max_val > 1e-15 {
+        for v in &mut x {
+            *v /= max_val;
+        }
+    }
+    x
 }
 
 #[cfg(test)]

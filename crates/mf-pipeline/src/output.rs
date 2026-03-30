@@ -208,6 +208,8 @@ mod tests {
                 distance: vec![1.0, 1.0],
                 closeness: vec![1.0, 1.0],
                 betweenness: vec![0.0, 0.0],
+                harmonic: vec![1.0, 1.0],
+                eigenvector: vec![1.0, 1.0],
             },
         }
     }
