@@ -526,10 +526,14 @@ impl SnapshotRenderer {
         let bpr = bytes_per_row as usize;
         let bpur = (width * 4) as usize;
 
-        // Flip Y: top of image = bottom of GPU framebuffer
-        let mut pixels: Vec<u8> = Vec::with_capacity((width * height * 4) as usize);
-        for row in (0..height as usize).rev() {
-            pixels.extend_from_slice(&data[row * bpr..row * bpr + bpur]);
+        // Flip Y: wgpu renders with Y=0 at top; image convention matches,
+        // but the readback buffer is bottom-up. Reverse row order in-place.
+        let total_bytes = (width * height * 4) as usize;
+        let mut pixels: Vec<u8> = vec![0u8; total_bytes];
+        for (dst_row, src_row) in (0..height as usize).rev().enumerate() {
+            let src = &data[src_row * bpr..src_row * bpr + bpur];
+            let dst_start = dst_row * bpur;
+            pixels[dst_start..dst_start + bpur].copy_from_slice(src);
         }
         drop(data);
         readback.unmap();

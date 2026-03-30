@@ -15,4 +15,8 @@ pub struct CentralityReport {
     /// Computed via power iteration.
     #[serde(default)]
     pub eigenvector: Vec<f64>,
+    /// PageRank centrality (damping = 0.85). Handles disconnected and directed
+    /// graphs naturally via random-walk teleportation.
+    #[serde(default)]
+    pub pagerank: Vec<f64>,
 }

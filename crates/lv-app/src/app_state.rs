@@ -25,6 +25,21 @@ pub struct EgoClusterState {
     pub cluster_value_min: f64,
     /// `cluster_value` upper bound (inclusive).
     pub cluster_value_max: f64,
+    /// Cached ego edges — invalidated when selection/direction/filters change.
+    #[allow(dead_code)]
+    pub cached_ego_edges: Option<Vec<EdgeRow>>,
+    /// Cached visible objects set.
+    #[allow(dead_code)]
+    pub cached_visible: Option<HashSet<String>>,
+}
+
+impl EgoClusterState {
+    /// Invalidate cached ego data (call when any ego parameter changes).
+    #[allow(dead_code)]
+    pub fn invalidate_cache(&mut self) {
+        self.cached_ego_edges = None;
+        self.cached_visible = None;
+    }
 }
 
 impl Default for EgoClusterState {
@@ -36,6 +51,8 @@ impl Default for EgoClusterState {
             shared_objects_only: false,
             cluster_value_min: f64::NEG_INFINITY,
             cluster_value_max: f64::INFINITY,
+            cached_ego_edges: None,
+            cached_visible: None,
         }
     }
 }

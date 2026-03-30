@@ -11,16 +11,25 @@ impl ClusterFilterPanel {
         ui.heading("Cluster Filter");
         ui.separator();
 
-        // Determine the actual data range
-        let (data_min, data_max) = if let Some(ds) = state.dataset() {
-            let vals: Vec<f64> = ds
-                .sheets
-                .iter()
-                .flat_map(|s| s.rows.iter().map(|r| r.cluster_value))
-                .collect();
-            let mn = vals.iter().cloned().fold(f64::INFINITY, f64::min);
-            let mx = vals.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-            (mn.min(0.0), mx.max(1.0))
+        // Use cached data range if available, otherwise compute and cache.
+        let (data_min, data_max) = if let Some(range) = state.cluster.cached_data_range {
+            range
+        } else if let Some(ds) = state.dataset() {
+            let mut mn = f64::INFINITY;
+            let mut mx = f64::NEG_INFINITY;
+            for s in &ds.sheets {
+                for r in &s.rows {
+                    if r.cluster_value < mn {
+                        mn = r.cluster_value;
+                    }
+                    if r.cluster_value > mx {
+                        mx = r.cluster_value;
+                    }
+                }
+            }
+            let range = (mn.min(0.0), mx.max(1.0));
+            state.cluster.cached_data_range = Some(range);
+            range
         } else {
             (0.0, 1.0)
         };

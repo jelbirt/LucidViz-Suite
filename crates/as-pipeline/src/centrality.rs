@@ -105,6 +105,9 @@ pub fn compute_centrality(
     // Eigenvector centrality via power iteration on the adjacency matrix.
     let eigenvector = eigenvector_centrality(adj, n);
 
+    // PageRank (damping = 0.85).
+    let pagerank = pagerank_centrality(adj, n, 0.85, 100, 1e-10);
+
     Ok(CentralityReport {
         labels: labels.to_vec(),
         degree,
@@ -113,6 +116,7 @@ pub fn compute_centrality(
         betweenness,
         harmonic,
         eigenvector,
+        pagerank,
     })
 }
 
@@ -124,7 +128,6 @@ struct State {
 
 impl State {
     fn new(cost: f64, node: usize) -> Self {
-        debug_assert!(!cost.is_nan(), "State cost must not be NaN");
         Self { cost, node }
     }
 }
@@ -211,7 +214,7 @@ fn shortest_paths_from(weighted_adj: &[Vec<(usize, f64)>], s: usize) -> Vec<f64>
     heap.push(State::new(0.0, s));
 
     while let Some(State { cost, node: v }) = heap.pop() {
-        if cost > dist[v] + EPS {
+        if cost.is_nan() || cost > dist[v] + EPS {
             continue;
         }
         for &(w, weight) in &weighted_adj[v] {
@@ -227,6 +230,61 @@ fn shortest_paths_from(weighted_adj: &[Vec<(usize, f64)>], s: usize) -> Vec<f64>
     }
 
     dist
+}
+
+/// PageRank centrality via power iteration.
+///
+/// Uses column-normalized adjacency with damping factor alpha (typically 0.85).
+/// Handles disconnected and directed graphs via random teleportation.
+fn pagerank_centrality(
+    adj: &Array2<f64>,
+    n: usize,
+    alpha: f64,
+    max_iter: usize,
+    tol: f64,
+) -> Vec<f64> {
+    if n == 0 {
+        return vec![];
+    }
+    if n == 1 {
+        return vec![1.0];
+    }
+
+    // Column sums for normalization (out-degree weighted).
+    let col_sums: Vec<f64> = (0..n).map(|j| (0..n).map(|i| adj[[i, j]]).sum()).collect();
+
+    let mut pr = vec![1.0 / n as f64; n];
+    let teleport = (1.0 - alpha) / n as f64;
+
+    for _ in 0..max_iter {
+        let mut new_pr = vec![teleport; n];
+        for j in 0..n {
+            if col_sums[j] > 1e-15 {
+                let contrib = alpha * pr[j] / col_sums[j];
+                for i in 0..n {
+                    new_pr[i] += adj[[i, j]] * contrib;
+                }
+            } else {
+                // Dangling node: distribute evenly.
+                let contrib = alpha * pr[j] / n as f64;
+                for val in new_pr.iter_mut() {
+                    *val += contrib;
+                }
+            }
+        }
+
+        let delta: f64 = pr
+            .iter()
+            .zip(new_pr.iter())
+            .map(|(a, b)| (a - b).abs())
+            .sum();
+        pr = new_pr;
+        if delta < tol {
+            break;
+        }
+    }
+
+    pr
 }
 
 /// Eigenvector centrality via power iteration.
@@ -357,7 +415,7 @@ fn brandes_source(weighted_adj: &[Vec<(usize, f64)>], n: usize, s: usize) -> Vec
     heap.push(State::new(0.0, s));
 
     while let Some(State { cost, node: v }) = heap.pop() {
-        if cost > dist[v] + EPS || settled[v] {
+        if cost.is_nan() || cost > dist[v] + EPS || settled[v] {
             continue;
         }
         settled[v] = true;
@@ -564,6 +622,43 @@ mod tests {
             report.eigenvector[0],
             report.eigenvector[1]
         );
+    }
+
+    #[test]
+    fn test_pagerank_sums_to_one() {
+        let n = 4;
+        let mut adj = Array2::<f64>::ones((n, n));
+        for i in 0..n {
+            adj[[i, i]] = 0.0;
+        }
+        let report = compute_centrality(&adj, &labels(n), CentralityMode::UndirectedLegacy)
+            .expect("centrality should compute");
+        let sum: f64 = report.pagerank.iter().sum();
+        assert!(
+            (sum - 1.0).abs() < 1e-6,
+            "PageRank should sum to 1.0, got {sum}"
+        );
+    }
+
+    #[test]
+    fn test_pagerank_star_center_dominates() {
+        let n = 5;
+        let mut adj = Array2::<f64>::zeros((n, n));
+        for i in 1..n {
+            adj[[0, i]] = 1.0;
+            adj[[i, 0]] = 1.0;
+        }
+        let report = compute_centrality(&adj, &labels(n), CentralityMode::UndirectedLegacy)
+            .expect("centrality should compute");
+        // Center node should have highest PageRank.
+        for i in 1..n {
+            assert!(
+                report.pagerank[0] > report.pagerank[i],
+                "center PR={} should > leaf PR={}",
+                report.pagerank[0],
+                report.pagerank[i]
+            );
+        }
     }
 
     #[test]

@@ -87,6 +87,51 @@ pub fn build_lis_buffer(dataset: &LvDataset, config: &LisConfig) -> LisBuffer {
     }
 }
 
+/// A small LRU cache for streaming mode to avoid recomputing recent frames.
+pub struct FrameCache {
+    entries: Vec<(u32, LisFrame)>,
+    capacity: usize,
+}
+
+impl FrameCache {
+    /// Create a new frame cache with the given capacity (number of frames to keep).
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            entries: Vec::with_capacity(capacity),
+            capacity,
+        }
+    }
+
+    /// Get a cached frame, or compute and cache it.
+    pub fn get_or_compute(
+        &mut self,
+        dataset: &LvDataset,
+        config: &LisConfig,
+        slice_index: u32,
+    ) -> &LisFrame {
+        // Check if already cached.
+        if let Some(pos) = self.entries.iter().position(|(idx, _)| *idx == slice_index) {
+            // Move to end (most recently used).
+            let entry = self.entries.remove(pos);
+            self.entries.push(entry);
+            return &self.entries.last().unwrap().1;
+        }
+
+        // Compute and insert.
+        let frame = compute_frame(dataset, config, slice_index);
+        if self.entries.len() >= self.capacity {
+            self.entries.remove(0); // evict oldest
+        }
+        self.entries.push((slice_index, frame));
+        &self.entries.last().unwrap().1
+    }
+
+    /// Clear all cached frames.
+    pub fn clear(&mut self) {
+        self.entries.clear();
+    }
+}
+
 /// Compute a single `LisFrame` on-demand (used in streaming mode).
 pub fn compute_frame(dataset: &LvDataset, config: &LisConfig, slice_index: u32) -> LisFrame {
     let lis = config.lis_value;
@@ -370,6 +415,39 @@ mod tests {
             "size midpoint: {}",
             inst.size
         );
+    }
+
+    #[test]
+    fn frame_cache_returns_same_result() {
+        let ds = make_two_sheet_dataset();
+        let cfg = lis4();
+        let mut cache = FrameCache::new(4);
+
+        let frame1 = compute_frame(&ds, &cfg, 2);
+        let cached = cache.get_or_compute(&ds, &cfg, 2);
+        assert_eq!(cached.slice_index, frame1.slice_index);
+        assert_eq!(cached.instances.len(), frame1.instances.len());
+        assert_eq!(cached.instances[0].position, frame1.instances[0].position);
+
+        // Second access should hit cache.
+        let cached2 = cache.get_or_compute(&ds, &cfg, 2);
+        assert_eq!(cached2.slice_index, 2);
+    }
+
+    #[test]
+    fn frame_cache_evicts_oldest() {
+        let ds = make_two_sheet_dataset();
+        let cfg = lis4();
+        let mut cache = FrameCache::new(2);
+
+        cache.get_or_compute(&ds, &cfg, 0);
+        cache.get_or_compute(&ds, &cfg, 1);
+        assert_eq!(cache.entries.len(), 2);
+
+        // Adding a third should evict frame 0.
+        cache.get_or_compute(&ds, &cfg, 2);
+        assert_eq!(cache.entries.len(), 2);
+        assert!(cache.entries.iter().all(|(idx, _)| *idx != 0));
     }
 
     #[test]

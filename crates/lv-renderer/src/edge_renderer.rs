@@ -99,8 +99,20 @@ impl EdgeRenderer {
             return;
         }
 
-        // Expand each GpuEdge into 4 vertices
-        let side_values = [2.0_f32, 1.0, -1.0, -2.0];
+        // Expand each GpuEdge into 4 vertices.
+        // Side encoding: sign = which endpoint, magnitude = which side of the line.
+        // +2.0 = start, left | +1.0 = start, right | -1.0 = end, right | -2.0 = end, left
+        // Must match thresholds in edge.wgsl (1.5, 0.5, -0.5).
+        const SIDE_START_LEFT: f32 = 2.0;
+        const SIDE_START_RIGHT: f32 = 1.0;
+        const SIDE_END_RIGHT: f32 = -1.0;
+        const SIDE_END_LEFT: f32 = -2.0;
+        let side_values = [
+            SIDE_START_LEFT,
+            SIDE_START_RIGHT,
+            SIDE_END_RIGHT,
+            SIDE_END_LEFT,
+        ];
         let mut verts: Vec<EdgeVertex> = Vec::with_capacity(edges.len() * 4);
         let mut indices: Vec<u32> = Vec::with_capacity(edges.len() * 6);
 

@@ -166,6 +166,8 @@ impl From<EgoSnapshot> for EgoClusterState {
             shared_objects_only: s.shared_objects_only,
             cluster_value_min: s.cluster_value_min,
             cluster_value_max: s.cluster_value_max,
+            cached_ego_edges: None,
+            cached_visible: None,
         }
     }
 }

@@ -206,6 +206,7 @@ mod tests {
                 betweenness: vec![0.0],
                 harmonic: vec![0.0],
                 eigenvector: vec![0.0],
+                pagerank: vec![0.0],
             },
         });
         state.mf_series_output = Some(MfSeriesOutput {

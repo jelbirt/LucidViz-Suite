@@ -299,6 +299,7 @@ mod tests {
             betweenness: vec![0.0; labels.len()],
             harmonic: vec![0.0; labels.len()],
             eigenvector: vec![0.0; labels.len()],
+            pagerank: vec![0.0; labels.len()],
         }
     }
 

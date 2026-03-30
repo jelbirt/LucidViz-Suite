@@ -208,6 +208,8 @@ pub struct ClusterState {
     pub ego_direction: EgoEdgeDirection,
     pub secondary_edges: bool,
     pub shared_only: bool,
+    /// Cached data range — recomputed only when dataset changes.
+    pub cached_data_range: Option<(f64, f64)>,
 }
 
 impl Default for ClusterState {
@@ -219,6 +221,7 @@ impl Default for ClusterState {
             ego_direction: EgoEdgeDirection::Both,
             secondary_edges: false,
             shared_only: false,
+            cached_data_range: None,
         }
     }
 }
@@ -354,6 +357,7 @@ impl AppState {
             source_path,
         });
         self.as_input_source = AsInputSource::Dataset;
+        self.cluster.cached_data_range = None;
         self.mf_output = None;
         self.mf_series_output = None;
         self.pending_slice_index = Some(0);

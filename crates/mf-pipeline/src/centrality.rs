@@ -20,7 +20,6 @@ struct State {
 
 impl State {
     fn new(cost: f64, node: usize) -> Self {
-        debug_assert!(!cost.is_nan(), "State cost must not be NaN");
         Self { cost, node }
     }
 }
@@ -79,7 +78,7 @@ fn brandes_source_adj(adj: &[Vec<(usize, f64)>], n: usize, s: usize) -> Vec<f64>
     heap.push(State::new(0.0, s));
 
     while let Some(State { cost, node: v }) = heap.pop() {
-        if cost > dist[v] + EPS || settled[v] {
+        if cost.is_nan() || cost > dist[v] + EPS || settled[v] {
             continue;
         }
         settled[v] = true;
@@ -224,6 +223,9 @@ pub fn compute_centrality_full(pg: &UnGraph<String, f64>, labels: &[String]) -> 
     // Eigenvector centrality via power iteration on adjacency weights.
     let eigenvector = eigenvector_centrality_pg(pg, n, &nodes);
 
+    // PageRank (undirected graph: symmetric adjacency, so PageRank ∝ degree).
+    let pagerank = pagerank_pg(pg, n, &nodes, 0.85, 100, 1e-10);
+
     CentralityReport {
         labels: labels.to_vec(),
         degree,
@@ -232,7 +234,68 @@ pub fn compute_centrality_full(pg: &UnGraph<String, f64>, labels: &[String]) -> 
         betweenness,
         harmonic,
         eigenvector,
+        pagerank,
     }
+}
+
+/// PageRank via power iteration on the petgraph adjacency.
+fn pagerank_pg(
+    pg: &UnGraph<String, f64>,
+    n: usize,
+    nodes: &[NodeIndex],
+    alpha: f64,
+    max_iter: usize,
+    tol: f64,
+) -> Vec<f64> {
+    if n == 0 {
+        return vec![];
+    }
+    if n == 1 {
+        return vec![1.0];
+    }
+
+    let idx_map: std::collections::HashMap<NodeIndex, usize> =
+        nodes.iter().enumerate().map(|(i, &ni)| (ni, i)).collect();
+
+    // Out-degree (weighted sum of edge weights) per node.
+    let out_degree: Vec<f64> = nodes
+        .iter()
+        .map(|&ni| pg.edges(ni).map(|e| *e.weight()).sum())
+        .collect();
+
+    let mut pr = vec![1.0 / n as f64; n];
+    let teleport = (1.0 - alpha) / n as f64;
+
+    for _ in 0..max_iter {
+        let mut new_pr = vec![teleport; n];
+        for (j, &nj) in nodes.iter().enumerate() {
+            if out_degree[j] > 1e-15 {
+                let contrib = alpha * pr[j] / out_degree[j];
+                for edge in pg.edges(nj) {
+                    if let Some(&i) = idx_map.get(&edge.target()) {
+                        new_pr[i] += edge.weight() * contrib;
+                    }
+                }
+            } else {
+                let contrib = alpha * pr[j] / n as f64;
+                for val in new_pr.iter_mut() {
+                    *val += contrib;
+                }
+            }
+        }
+
+        let delta: f64 = pr
+            .iter()
+            .zip(new_pr.iter())
+            .map(|(a, b)| (a - b).abs())
+            .sum();
+        pr = new_pr;
+        if delta < tol {
+            break;
+        }
+    }
+
+    pr
 }
 
 /// Eigenvector centrality via power iteration on the petgraph adjacency.

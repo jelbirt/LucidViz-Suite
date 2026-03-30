@@ -81,29 +81,30 @@ fn parse_sheet(
     name: &str,
     sheet_index: usize,
 ) -> Result<LvSheet, DataError> {
-    // Collect all rows up-front so we can search for the edge boundary
-    let rows_raw: Vec<Vec<Data>> = range.rows().map(|r| r.to_vec()).collect();
+    // Stream rows: scan for the edge boundary row-by-row without collecting
+    // the entire sheet into memory. We need two passes: one to find the edge
+    // section boundary, one to parse rows. Since calamine's Range is
+    // cheaply iterable, this is efficient.
+    let total_rows = range.rows().count();
 
-    // Edge section starts at the first row where col-0 is "from" (case-insensitive)
-    let edge_start = rows_raw.iter().position(|row| {
+    // Find edge section boundary (first row where col-0 is "from").
+    let edge_start = range.rows().enumerate().position(|(_, row)| {
         row.first()
             .and_then(|c: &Data| c.get_string())
             .map(|s| s.trim().eq_ignore_ascii_case("from"))
             .unwrap_or(false)
     });
 
-    // Row 0 is the column-header row — skip it.  Object rows end before edge section.
-    let object_end = edge_start.unwrap_or(rows_raw.len());
-    let object_rows = if rows_raw.len() <= 1 {
-        &rows_raw[rows_raw.len()..] // empty slice
-    } else {
-        &rows_raw[1..object_end]
-    };
+    let object_end = edge_start.unwrap_or(total_rows);
 
-    let mut rows: Vec<LvRow> = Vec::with_capacity(object_rows.len());
-    for (i, raw) in object_rows.iter().enumerate() {
-        // i+2 because row 0 = header, row 1 = first data row (1-based)
-        if let Some(row) = parse_lv_row(raw, name, i + 2)? {
+    // Parse object rows (skip header at row 0).
+    let mut rows: Vec<LvRow> = Vec::new();
+    for (i, raw) in range.rows().enumerate() {
+        if i == 0 || i >= object_end {
+            continue;
+        }
+        let raw_vec: Vec<Data> = raw.to_vec();
+        if let Some(row) = parse_lv_row(&raw_vec, name, i + 1)? {
             rows.push(row);
         }
     }
@@ -114,10 +115,15 @@ fn parse_sheet(
         });
     }
 
+    // Parse edge rows (after the "from" header).
     let mut edges: Vec<EdgeRow> = Vec::new();
     if let Some(start) = edge_start {
-        for (offset, raw) in rows_raw.iter().skip(start + 1).enumerate() {
-            if let Some(edge) = parse_edge_row(raw, name, start + offset + 2)? {
+        for (i, raw) in range.rows().enumerate() {
+            if i <= start {
+                continue;
+            }
+            let raw_vec: Vec<Data> = raw.to_vec();
+            if let Some(edge) = parse_edge_row(&raw_vec, name, i + 1)? {
                 edges.push(edge);
             }
         }

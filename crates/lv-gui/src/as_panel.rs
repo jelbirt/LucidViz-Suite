@@ -794,6 +794,7 @@ mod tests {
                 betweenness: vec![0.0; 2],
                 harmonic: vec![0.0; 2],
                 eigenvector: vec![0.0; 2],
+                pagerank: vec![0.0; 2],
             },
         };
 
@@ -910,6 +911,7 @@ mod tests {
                 betweenness: vec![0.0; 2],
                 harmonic: vec![0.0; 2],
                 eigenvector: vec![0.0; 2],
+                pagerank: vec![0.0; 2],
             },
         };
 

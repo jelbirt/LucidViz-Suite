@@ -9,7 +9,7 @@ use lv_data::SimToDistMethod;
 use crate::centrality::compute_centrality;
 use crate::mds::run_mds;
 use crate::normalize::{normalize_coordinate_series, normalize_coordinates};
-use crate::procrustes::{gpa, procrustes};
+use crate::procrustes::{gpa, procrustes, procrustes_residual};
 use crate::structural_eq::compute_se_matrix;
 use crate::types::{
     AsDistancePipelineInput, AsPipelineInput, AsPipelineResult, CentralityState, DistanceMatrix,
@@ -370,9 +370,9 @@ fn choose_optimal_reference(
                 continue;
             }
 
-            match procrustes(other, candidate, procrustes_scale) {
-                Ok(result) => {
-                    total_residual += result.residual;
+            match procrustes_residual(other, candidate, procrustes_scale) {
+                Ok(residual) => {
+                    total_residual += residual;
                 }
                 Err(_) => {
                     valid = false;

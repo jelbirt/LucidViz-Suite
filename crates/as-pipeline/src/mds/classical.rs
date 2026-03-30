@@ -5,7 +5,7 @@
 
 use anyhow::{bail, Result};
 use nalgebra::{DMatrix, SymmetricEigen};
-use ndarray::Array2;
+use rayon::prelude::*;
 
 use crate::error::AsError;
 use crate::types::{MdsAlgorithm, MdsCoordinates, SeMatrix};
@@ -24,20 +24,34 @@ pub fn classical_mds(dist: &SeMatrix, dims: usize) -> Result<MdsCoordinates> {
     }
     let dims = dims.min(n - 1);
 
-    // Step 1: D² matrix (ndarray).
-    let d2: Array2<f64> = Array2::from_shape_fn((n, n), |(i, j)| {
-        let d = dist.get(i, j);
-        d * d
-    });
-
-    // Step 2: Double-centering → B matrix.
-    // B[i,j] = -0.5 * (D2[i,j] - row_mean[i] - col_mean[j] + grand_mean)
-    let row_means: Vec<f64> = (0..n).map(|i| d2.row(i).sum() / n as f64).collect();
-    let col_means: Vec<f64> = (0..n).map(|j| d2.column(j).sum() / n as f64).collect();
-    let grand_mean: f64 = row_means.iter().sum::<f64>() / n as f64;
+    // Step 1-2: Build D² and double-center directly into nalgebra DMatrix.
+    // Avoids the ndarray→nalgebra element-by-element copy.
+    let mut row_means = vec![0.0f64; n];
+    let mut col_means = vec![0.0f64; n];
+    let mut grand_sum = 0.0f64;
+    let d2: Vec<f64> = (0..n * n)
+        .map(|idx| {
+            let i = idx / n;
+            let j = idx % n;
+            let d = dist.get(i, j);
+            let d2_val = d * d;
+            row_means[i] += d2_val;
+            col_means[j] += d2_val;
+            grand_sum += d2_val;
+            d2_val
+        })
+        .collect();
+    let n_f = n as f64;
+    for v in &mut row_means {
+        *v /= n_f;
+    }
+    for v in &mut col_means {
+        *v /= n_f;
+    }
+    let grand_mean = grand_sum / (n_f * n_f);
 
     let b = DMatrix::<f64>::from_fn(n, n, |i, j| {
-        -0.5 * (d2[[i, j]] - row_means[i] - col_means[j] + grand_mean)
+        -0.5 * (d2[i * n + j] - row_means[i] - col_means[j] + grand_mean)
     });
 
     // Step 3: Eigendecomposition of B (symmetric positive semi-definite).
@@ -74,17 +88,23 @@ pub fn classical_mds(dist: &SeMatrix, dims: usize) -> Result<MdsCoordinates> {
 }
 
 /// Kruskal stress-1: sqrt( sum_{i<j}(d_hat - d)^2 / sum_{i<j} d^2 )
+/// Parallelized over rows via rayon for large n.
 pub(crate) fn kruskal_stress(dist: &SeMatrix, coords: &[f64], n: usize, dims: usize) -> f64 {
-    let mut num = 0.0f64;
-    let mut denom = 0.0f64;
-    for i in 0..n {
-        for j in (i + 1)..n {
-            let d = dist.get(i, j);
-            let d_hat = euclidean_dist(coords, i, j, dims);
-            num += (d_hat - d) * (d_hat - d);
-            denom += d * d;
-        }
-    }
+    let (num, denom) = (0..n)
+        .into_par_iter()
+        .map(|i| {
+            let mut row_num = 0.0f64;
+            let mut row_denom = 0.0f64;
+            for j in (i + 1)..n {
+                let d = dist.get(i, j);
+                let d_hat = euclidean_dist(coords, i, j, dims);
+                row_num += (d_hat - d) * (d_hat - d);
+                row_denom += d * d;
+            }
+            (row_num, row_denom)
+        })
+        .reduce(|| (0.0, 0.0), |a, b| (a.0 + b.0, a.1 + b.1));
+
     if denom < 1e-15 {
         0.0
     } else {
@@ -154,5 +174,33 @@ mod tests {
         let se = line_dist(5);
         let coords = classical_mds(&se, 3).unwrap();
         assert_eq!(coords.data.len(), 5 * 3);
+    }
+
+    #[test]
+    fn test_mds_preserves_distance_ordering() {
+        // Two nodes at distance 1, two at distance 5 — MDS should preserve
+        // that the far pair is farther than the close pair in the embedding.
+        let vals = vec![0.0, 1.0, 5.0, 1.0, 0.0, 4.0, 5.0, 4.0, 0.0];
+        let se = make_se(3, vals);
+        let coords = classical_mds(&se, 2).unwrap();
+        let d01 = euclidean_dist(&coords.data, 0, 1, 2);
+        let d02 = euclidean_dist(&coords.data, 0, 2, 2);
+        assert!(
+            d02 > d01,
+            "dist(0,2)={d02} should > dist(0,1)={d01} since input d(0,2)=5 > d(0,1)=1"
+        );
+    }
+
+    #[test]
+    fn test_two_node_exact_embedding() {
+        // Two nodes at distance 3 → 1D embedding should give exactly distance 3.
+        let vals = vec![0.0, 3.0, 3.0, 0.0];
+        let se = make_se(2, vals);
+        let coords = classical_mds(&se, 1).unwrap();
+        let d = euclidean_dist(&coords.data, 0, 1, 1);
+        assert!(
+            (d - 3.0).abs() < 1e-6,
+            "two-node MDS distance should be exact: got {d}"
+        );
     }
 }

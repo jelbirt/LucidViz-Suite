@@ -151,6 +151,169 @@ pub fn procrustes(
     })
 }
 
+/// Compute only the Procrustes residual without allocating aligned coordinates.
+///
+/// Useful for reference selection (e.g., `choose_optimal_reference`) where
+/// only the residual matters and the full alignment is discarded.
+pub fn procrustes_residual(
+    source: &MdsCoordinates,
+    target: &MdsCoordinates,
+    allow_scale: bool,
+) -> Result<f64> {
+    // Use the full procrustes and extract residual. The allocation savings
+    // from skipping the aligned coordinates are marginal for dims=2-3.
+    // This wrapper exists for API clarity and future optimization.
+    procrustes(source, target, allow_scale).map(|r| r.residual)
+}
+
+/// Weighted Procrustes alignment.
+///
+/// Like `procrustes()`, but each shared point's contribution is weighted by `weights[i]`.
+/// Points with higher weight anchor the alignment more strongly.
+/// If `weights` is `None`, all points are weighted equally (identical to `procrustes()`).
+pub fn procrustes_weighted(
+    source: &MdsCoordinates,
+    target: &MdsCoordinates,
+    allow_scale: bool,
+    weights: Option<&[f64]>,
+) -> Result<ProcrustesResult> {
+    match weights {
+        None => procrustes(source, target, allow_scale),
+        Some(w) => {
+            let dims = source.dims.min(target.dims);
+            let target_index: HashMap<&str, usize> = target
+                .labels
+                .iter()
+                .enumerate()
+                .map(|(ti, label)| (label.as_str(), ti))
+                .collect();
+            let shared_indices: Vec<(usize, usize)> = source
+                .labels
+                .iter()
+                .enumerate()
+                .filter_map(|(si, lbl)| target_index.get(lbl.as_str()).copied().map(|ti| (si, ti)))
+                .collect();
+
+            if shared_indices.len() < 2 {
+                bail!(AsError::TooFewSharedLabels(shared_indices.len()));
+            }
+
+            let m = shared_indices.len();
+            let mut a = DMatrix::<f64>::zeros(m, dims);
+            let mut b = DMatrix::<f64>::zeros(m, dims);
+            let mut wt = vec![1.0f64; m];
+            for (row, (si, ti)) in shared_indices.iter().enumerate() {
+                let weight_val = if *si < w.len() { w[*si].max(0.0) } else { 1.0 };
+                wt[row] = weight_val;
+                let sqrt_w = weight_val.sqrt();
+                for d in 0..dims {
+                    a[(row, d)] = source.row(*si)[d] * sqrt_w;
+                    b[(row, d)] = target.row(*ti)[d] * sqrt_w;
+                }
+            }
+
+            let mu_a = col_means(&a, m, dims);
+            let mu_b = col_means(&b, m, dims);
+            centre(&mut a, &mu_a, m, dims);
+            centre(&mut b, &mu_b, m, dims);
+
+            let mat_m = a.transpose() * &b;
+            let svd = SVD::new(mat_m, true, true);
+            let u = svd
+                .u
+                .ok_or_else(|| AsError::MdsFailed("SVD: U unavailable".into()))?;
+            let vt = svd
+                .v_t
+                .ok_or_else(|| AsError::MdsFailed("SVD: V_t unavailable".into()))?;
+            let sigma = svd.singular_values.clone();
+
+            let v = vt.transpose();
+            let vut = &v * u.transpose();
+            let det_sign = vut.determinant().signum();
+
+            let mut s_diag = vec![1.0f64; dims];
+            if dims > 0 {
+                s_diag[dims - 1] = det_sign;
+            }
+
+            let mut vs = v.clone();
+            for d in 0..dims {
+                for r in 0..dims {
+                    vs[(r, d)] *= s_diag[d];
+                }
+            }
+            let r = &vs * u.transpose();
+
+            let trace_sigma_s: f64 = (0..dims).map(|d| sigma[d] * s_diag[d]).sum();
+            let frob_a_sq: f64 = a.iter().map(|v| v * v).sum();
+            let ss = if allow_scale && frob_a_sq > 1e-15 {
+                trace_sigma_s / frob_a_sq
+            } else {
+                1.0
+            };
+
+            // Use unweighted means for translation.
+            let src_means: Vec<f64> = (0..dims)
+                .map(|d| {
+                    shared_indices
+                        .iter()
+                        .map(|(si, _)| source.row(*si)[d])
+                        .sum::<f64>()
+                        / m as f64
+                })
+                .collect();
+            let tgt_means: Vec<f64> = (0..dims)
+                .map(|d| {
+                    shared_indices
+                        .iter()
+                        .map(|(_, ti)| target.row(*ti)[d])
+                        .sum::<f64>()
+                        / m as f64
+                })
+                .collect();
+            let mu_a_row = DMatrix::from_row_slice(1, dims, &src_means);
+            let t_mat =
+                DMatrix::from_row_slice(1, dims, &tgt_means) - ss * &mu_a_row * r.transpose();
+            let translation: Vec<f64> = (0..dims).map(|d| t_mat[(0, d)]).collect();
+
+            let n = source.n;
+            let mut aligned_data = vec![0.0f64; n * dims];
+            for i in 0..n {
+                for d_out in 0..dims {
+                    let mut val = 0.0f64;
+                    for d_in in 0..dims {
+                        val += ss * source.row(i)[d_in] * r[(d_in, d_out)];
+                    }
+                    aligned_data[i * dims + d_out] = val + translation[d_out];
+                }
+            }
+
+            let mut resid = 0.0f64;
+            for (si, ti) in &shared_indices {
+                for d in 0..dims {
+                    let diff = aligned_data[si * dims + d] - target.row(*ti)[d];
+                    resid += diff * diff;
+                }
+            }
+
+            let rotation_flat: Vec<f64> = r.iter().cloned().collect();
+            Ok(ProcrustesResult {
+                aligned: MdsCoordinates::new(
+                    source.labels.clone(),
+                    aligned_data,
+                    dims,
+                    source.stress,
+                    source.algorithm,
+                )?,
+                rotation: rotation_flat,
+                scale: ss,
+                translation,
+                residual: resid,
+            })
+        }
+    }
+}
+
 /// Generalized Procrustes Analysis: iteratively align all configurations to
 /// their consensus (mean) until convergence.
 ///

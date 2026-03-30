@@ -234,4 +234,32 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn test_pmi_known_property() {
+        // For words that co-occur frequently, their NPPMI should be positive.
+        // "alpha" and "beta" appear together in windows → NPPMI(alpha,beta) > 0.
+        let toks = tokens(&["alpha", "beta", "alpha", "beta", "alpha", "beta"]);
+        let graph = build_cooccurrence(&toks, &basic_config());
+        let pmi = compute_pmi(&graph);
+        let n = graph.vocab_size;
+        // Find alpha and beta indices.
+        let alpha_idx = graph.vocab.iter().position(|t| t.0 == "alpha").unwrap();
+        let beta_idx = graph.vocab.iter().position(|t| t.0 == "beta").unwrap();
+        assert!(
+            pmi[alpha_idx * n + beta_idx] > 0.0,
+            "Frequently co-occurring words should have positive NPPMI"
+        );
+    }
+
+    #[test]
+    fn test_ppmi_nonnegative() {
+        // PPMI = max(PMI, 0) → must be non-negative.
+        let toks = tokens(&["alpha", "beta", "gamma", "delta", "alpha", "gamma"]);
+        let graph = build_cooccurrence(&toks, &basic_config());
+        let ppmi = compute_ppmi(&graph);
+        for (i, &v) in ppmi.iter().enumerate() {
+            assert!(v >= 0.0, "PPMI[{i}] = {v} is negative");
+        }
+    }
 }

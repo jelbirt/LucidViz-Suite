@@ -60,23 +60,24 @@ pub fn run_mf_pipeline(config: &MfPipelineConfig) -> Result<MfOutput> {
     let n = cooccurrence.vocab_size;
     let labels: Vec<String> = cooccurrence.vocab.iter().map(|t| t.0.clone()).collect();
 
-    // 6. PMI / similarity
+    // 6. PMI / similarity — conditional computation to avoid unnecessary work
     let nppmi_matrix = compute_pmi(&cooccurrence);
-    let ppmi_matrix = compute_ppmi(&cooccurrence);
-    let (similarity_matrix, nppmi_matrix) = if config.mf_config.use_pmi {
+    let (similarity_matrix, nppmi_matrix, ppmi_matrix) = if config.mf_config.use_pmi {
         match config.mf_config.similarity_method {
             SimilarityMethod::PpmiSvd => {
+                let ppmi = compute_ppmi(&cooccurrence);
                 let rank = auto_svd_rank(n);
-                let svd_sim = ppmi_svd_similarity(&ppmi_matrix, n, rank);
-                (svd_sim, nppmi_matrix)
+                let svd_sim = ppmi_svd_similarity(&ppmi, n, rank);
+                (svd_sim, nppmi_matrix, ppmi)
             }
             SimilarityMethod::Nppmi => {
-                let sim = nppmi_matrix;
-                (sim.clone(), sim)
+                let ppmi = compute_ppmi(&cooccurrence);
+                (nppmi_matrix.clone(), nppmi_matrix, ppmi)
             }
         }
     } else {
-        (compute_count_similarity(&cooccurrence), nppmi_matrix)
+        let ppmi = compute_ppmi(&cooccurrence);
+        (compute_count_similarity(&cooccurrence), nppmi_matrix, ppmi)
     };
     // Take ownership of the raw counts instead of cloning
     let raw_counts = std::mem::take(&mut cooccurrence.matrix);
@@ -210,21 +211,22 @@ fn build_output_from_cooccurrence(
     let n = cooccurrence.vocab_size;
     let labels: Vec<String> = cooccurrence.vocab.iter().map(|t| t.0.clone()).collect();
     let nppmi_matrix = compute_pmi(&cooccurrence);
-    let ppmi_matrix = compute_ppmi(&cooccurrence);
-    let (similarity_matrix, nppmi_matrix) = if mf_config.use_pmi {
+    let (similarity_matrix, nppmi_matrix, ppmi_matrix) = if mf_config.use_pmi {
         match mf_config.similarity_method {
             SimilarityMethod::PpmiSvd => {
+                let ppmi = compute_ppmi(&cooccurrence);
                 let rank = auto_svd_rank(n);
-                let svd_sim = ppmi_svd_similarity(&ppmi_matrix, n, rank);
-                (svd_sim, nppmi_matrix)
+                let svd_sim = ppmi_svd_similarity(&ppmi, n, rank);
+                (svd_sim, nppmi_matrix, ppmi)
             }
             SimilarityMethod::Nppmi => {
-                let sim = nppmi_matrix;
-                (sim.clone(), sim)
+                let ppmi = compute_ppmi(&cooccurrence);
+                (nppmi_matrix.clone(), nppmi_matrix, ppmi)
             }
         }
     } else {
-        (compute_count_similarity(&cooccurrence), nppmi_matrix)
+        let ppmi = compute_ppmi(&cooccurrence);
+        (compute_count_similarity(&cooccurrence), nppmi_matrix, ppmi)
     };
     let raw_counts = std::mem::take(&mut cooccurrence.matrix);
     let pg = build_petgraph(&cooccurrence, &similarity_matrix, mf_config);
