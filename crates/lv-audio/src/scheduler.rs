@@ -123,8 +123,10 @@ impl BeatsScheduler {
 
             let _ = self.engine.note_on(channel, note, vel, instrument);
 
-            // schedule note-off
-            let off_at = absolute_slice + self.hold_slices;
+            // Schedule note-off. Ensure at least 1 slice of sustain so the
+            // note-off fires after the note-on (the off-loop runs first in
+            // on_frame_advance).
+            let off_at = absolute_slice + self.hold_slices.max(1);
             self.pending_offs.push(PendingNoteOff {
                 channel,
                 note,

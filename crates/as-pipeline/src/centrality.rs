@@ -175,7 +175,16 @@ fn weighted_adjacency_undirected(graph: &UnGraph<usize, f64>) -> Vec<Vec<(usize,
         .map(|&node| {
             graph
                 .edges(node)
-                .map(|edge| (graph[edge.target()], *edge.weight()))
+                .map(|edge| {
+                    // For undirected edges, `target()` may return `node`
+                    // itself depending on storage order. Pick the other end.
+                    let neighbour = if edge.source() == node {
+                        edge.target()
+                    } else {
+                        edge.source()
+                    };
+                    (graph[neighbour], *edge.weight())
+                })
                 .collect()
         })
         .collect()
@@ -395,8 +404,10 @@ fn parallel_brandes_betweenness(
     if directed {
         between.iter().map(|&b| b / norm).collect()
     } else {
-        // Undirected: each pair is counted from both endpoints, so divide by 2
-        between.iter().map(|&b| b / 2.0 / norm).collect()
+        // Undirected: Brandes over all n sources double-counts each unordered
+        // pair {s,t}. Normalization denominator for undirected is (n-1)(n-2)/2.
+        // Combined: raw / ((n-1)(n-2)) = raw / norm.
+        between.iter().map(|&b| b / norm).collect()
     }
 }
 

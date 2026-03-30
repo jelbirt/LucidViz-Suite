@@ -36,6 +36,9 @@ pub struct SequenceConfig {
     pub width: u32,
     pub height: u32,
     pub format: ImageFormat,
+    /// When `false` (default), skip frames whose output file already exists.
+    /// When `true`, overwrite existing files.
+    pub overwrite: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -118,6 +121,11 @@ pub fn capture_sequence_with_control(
 
         let filename = format!("{}_{frame_idx:06}.{ext}", config.filename_prefix);
         let path = config.output_dir.join(&filename);
+
+        if !config.overwrite && path.exists() {
+            // Skip existing frames to prevent accidental data loss.
+            continue;
+        }
 
         img.save(&path).with_context(|| format!("save {path:?}"))?;
 
@@ -282,6 +290,7 @@ mod tests {
             width: 128,
             height: 128,
             format: ImageFormat::Png,
+            overwrite: true,
         };
 
         let err = capture_sequence_with_control(

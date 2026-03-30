@@ -110,6 +110,20 @@ pub fn export_video_with_control(
         bail!("crf must be in [0, 63], got {}", vid_config.crf);
     }
 
+    // ── Validate inputs before spawning ffmpeg ─────────────────────────
+    if buffer.total_frames == 0 {
+        bail!("export_video requires at least one frame");
+    }
+
+    let end = end_frame.min(buffer.total_frames.saturating_sub(1));
+    if start_frame > end {
+        bail!(
+            "export_video start_frame {} is out of range for {} total frames",
+            start_frame,
+            buffer.total_frames
+        );
+    }
+
     // Verify ffmpeg is available
     Command::new("ffmpeg")
         .arg("-version")
@@ -123,7 +137,7 @@ pub fn export_video_with_control(
         .to_str()
         .context("output_path is not valid UTF-8")?;
 
-    // Spawn ffmpeg: read rawvideo RGBA from stdin
+    // Spawn ffmpeg: read rawvideo RGBA from stdin (all validation passed)
     let mut ffmpeg = Command::new("ffmpeg")
         .args([
             "-y", // overwrite output
@@ -152,18 +166,6 @@ pub fn export_video_with_control(
         .context("spawn ffmpeg")?;
 
     let stdin = ffmpeg.stdin.as_mut().context("ffmpeg stdin")?;
-    if buffer.total_frames == 0 {
-        bail!("export_video requires at least one frame");
-    }
-
-    let end = end_frame.min(buffer.total_frames.saturating_sub(1));
-    if start_frame > end {
-        bail!(
-            "export_video start_frame {} is out of range for {} total frames",
-            start_frame,
-            buffer.total_frames
-        );
-    }
     let total = (end + 1).saturating_sub(start_frame).max(1) as f32;
     let renderer = SnapshotRenderer::new(ctx);
 

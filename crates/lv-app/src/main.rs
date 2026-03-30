@@ -950,6 +950,7 @@ impl Renderer {
                             width: request.width,
                             height: request.height,
                             format: image_format,
+                            overwrite: true,
                         };
                         capture_sequence_with_control(
                             &ctx,
@@ -1428,9 +1429,9 @@ impl Renderer {
             if matches!(action, Some(AppAction::Exit)) {
                 // propagated via CloseRequested event
             }
-        } else {
-            self.camera.key_pressed(ck);
         }
+        // Key release is a no-op: the camera applies immediate deltas per
+        // key_pressed call and has no held-key state to clear.
     }
 }
 

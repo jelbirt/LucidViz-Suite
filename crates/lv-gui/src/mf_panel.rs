@@ -298,6 +298,11 @@ impl MfPanel {
     }
 
     fn launch_job(&mut self, state: &mut AppState) {
+        // Drop any previous job. If the old thread is still running, its
+        // channel sends will fail silently on the disconnected receiver,
+        // causing it to stop naturally after completing its current step.
+        state.mf_job = None;
+
         let (tx, rx) = mpsc::channel::<PipelineEvent>();
 
         let mut sources: Vec<PathBuf> = self.input_files.clone();

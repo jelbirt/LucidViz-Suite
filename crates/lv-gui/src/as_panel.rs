@@ -349,6 +349,9 @@ impl AsPanel {
     }
 
     fn launch_dataset_job(&self, ds: &LvDataset, output_dir: PathBuf, state: &mut AppState) {
+        // Drop any previous job so its thread stops naturally.
+        state.as_job = None;
+
         let (tx, rx) = mpsc::channel::<PipelineEvent>();
 
         let source_dataset = ds.clone();
@@ -411,6 +414,8 @@ impl AsPanel {
         output_dir: PathBuf,
         state: &mut AppState,
     ) {
+        state.as_job = None;
+
         let (tx, rx) = mpsc::channel::<PipelineEvent>();
 
         let output = mf_output.clone();
@@ -472,6 +477,8 @@ impl AsPanel {
         output_dir: PathBuf,
         state: &mut AppState,
     ) {
+        state.as_job = None;
+
         let (tx, rx) = mpsc::channel::<PipelineEvent>();
 
         let output = series.clone();

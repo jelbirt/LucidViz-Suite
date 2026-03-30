@@ -23,16 +23,31 @@ pub fn temp_path(path: &Path) -> std::io::Result<PathBuf> {
 
 /// Atomically rename `tmp_path` to `dst_path`, with a fallback
 /// delete-then-rename for platforms where rename over an existing file fails.
+///
+/// On POSIX, `rename` atomically replaces the destination, so the fallback
+/// path is only reached on Windows where rename fails if the destination
+/// exists.  The fallback creates a brief window where neither file exists;
+/// the tmp file is preserved on any failure so data is not lost.
 pub fn replace_file(tmp_path: &Path, dst_path: &Path) -> std::io::Result<()> {
-    if let Err(err) = std::fs::rename(tmp_path, dst_path) {
-        if dst_path.exists() {
-            let _ = std::fs::remove_file(dst_path);
-            std::fs::rename(tmp_path, dst_path)?;
-        } else {
-            return Err(err);
+    match std::fs::rename(tmp_path, dst_path) {
+        Ok(()) => Ok(()),
+        Err(_) if dst_path.exists() => {
+            // Destination exists and rename failed (Windows).
+            // Back up the destination so we can restore it on failure.
+            let backup = dst_path.with_extension("bak");
+            std::fs::rename(dst_path, &backup)?;
+            if let Err(rename_err) = std::fs::rename(tmp_path, dst_path) {
+                // Restore the original file from backup.
+                let _ = std::fs::rename(&backup, dst_path);
+                Err(rename_err)
+            } else {
+                // Success — remove the backup.
+                let _ = std::fs::remove_file(&backup);
+                Ok(())
+            }
         }
+        Err(err) => Err(err),
     }
-    Ok(())
 }
 
 /// Write `bytes` to `path` atomically via a temp file + rename.

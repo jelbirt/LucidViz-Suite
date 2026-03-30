@@ -38,12 +38,20 @@ fn vs_main(in: VertexInput) -> VertexOutput {
     let clip_from = uniforms.view_proj * vec4<f32>(in.from_pos, 1.0);
     let clip_to   = uniforms.view_proj * vec4<f32>(in.to_pos,   1.0);
 
-    // NDC positions
-    let ndc_from = clip_from.xy / clip_from.w;
-    let ndc_to   = clip_to.xy   / clip_to.w;
+    // Guard against endpoints behind the near plane (w <= 0) which would
+    // produce NaN from the perspective divide and corrupt the quad.
+    let safe_w_from = max(clip_from.w, 0.0001);
+    let safe_w_to   = max(clip_to.w,   0.0001);
 
-    // Screen-space direction (pixels)
-    let dir_px  = normalize((ndc_to - ndc_from) * uniforms.viewport_size * 0.5);
+    // NDC positions (safe from division by zero/negative)
+    let ndc_from = clip_from.xy / safe_w_from;
+    let ndc_to   = clip_to.xy   / safe_w_to;
+
+    // Screen-space direction (pixels). Guard against zero-length edges
+    // (coincident endpoints or both clamped) which would NaN in normalize.
+    let raw_dir = (ndc_to - ndc_from) * uniforms.viewport_size * 0.5;
+    let dir_len = length(raw_dir);
+    let dir_px  = select(vec2<f32>(1.0, 0.0), raw_dir / dir_len, dir_len > 1e-5);
     // Perpendicular in NDC
     let perp_ndc = vec2<f32>(-dir_px.y, dir_px.x) / (uniforms.viewport_size * 0.5) * LINE_WIDTH_PX;
 

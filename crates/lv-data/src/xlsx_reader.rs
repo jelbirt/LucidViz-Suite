@@ -181,12 +181,11 @@ fn parse_lv_row(raw: &[Data], sheet: &str, row_num: usize) -> Result<Option<LvRo
     let color_b =
         cell_f64(raw, 12).ok_or_else(|| mk_err(12, "number (color_b)", &cell_raw(raw, 12)))? as f32;
 
-    let note = optional_integer_cell(raw, 13, sheet, row_num, 60.0, 0.0, u8::MAX as f64)? as u8;
-    let instrument =
-        optional_integer_cell(raw, 14, sheet, row_num, 0.0, 0.0, u16::MAX as f64)? as u16;
-    let channel = optional_integer_cell(raw, 15, sheet, row_num, 0.0, 0.0, u8::MAX as f64)? as u8;
-    let velocity = optional_integer_cell(raw, 16, sheet, row_num, 64.0, 0.0, u8::MAX as f64)? as u8;
-    let cluster_value = cell_f64(raw, 17).unwrap_or(0.0);
+    let note = optional_integer_cell(raw, 13, sheet, row_num, 60.0, 0.0, 127.0)? as u8;
+    let instrument = optional_integer_cell(raw, 14, sheet, row_num, 0.0, 0.0, 365.0)? as u16;
+    let channel = optional_integer_cell(raw, 15, sheet, row_num, 0.0, 0.0, 15.0)? as u8;
+    let velocity = optional_integer_cell(raw, 16, sheet, row_num, 64.0, 1.0, 127.0)? as u8;
+    let cluster_value = optional_finite_cell(raw, 17, sheet, row_num, 0.0)?;
     let beats = optional_integer_cell(raw, 18, sheet, row_num, 0.0, 0.0, u32::MAX as f64)? as u32;
 
     Ok(Some(LvRow {

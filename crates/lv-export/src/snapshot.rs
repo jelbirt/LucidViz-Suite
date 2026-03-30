@@ -526,13 +526,14 @@ impl SnapshotRenderer {
         let bpr = bytes_per_row as usize;
         let bpur = (width * 4) as usize;
 
-        // Flip Y: wgpu renders with Y=0 at top; image convention matches,
-        // but the readback buffer is bottom-up. Reverse row order in-place.
+        // wgpu (Vulkan/Metal/DX12) readback has row 0 at the top, matching
+        // standard image convention. Copy rows directly, stripping any
+        // per-row padding the GPU driver may have added.
         let total_bytes = (width * height * 4) as usize;
         let mut pixels: Vec<u8> = vec![0u8; total_bytes];
-        for (dst_row, src_row) in (0..height as usize).rev().enumerate() {
-            let src = &data[src_row * bpr..src_row * bpr + bpur];
-            let dst_start = dst_row * bpur;
+        for row in 0..height as usize {
+            let src = &data[row * bpr..row * bpr + bpur];
+            let dst_start = row * bpur;
             pixels[dst_start..dst_start + bpur].copy_from_slice(src);
         }
         drop(data);

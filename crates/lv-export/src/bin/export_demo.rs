@@ -262,6 +262,7 @@ fn main() -> Result<()> {
         width: 1280,
         height: 720,
         format: ImageFormat::Png,
+        overwrite: true,
     };
 
     let (tx, rx) = mpsc::channel::<f32>();

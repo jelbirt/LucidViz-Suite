@@ -106,7 +106,7 @@ impl NotificationQueue {
 
         // Stack from top-right, top-to-bottom
         let mut offset_y = margin;
-        for notif in &self.toasts {
+        for (idx, notif) in self.toasts.iter().enumerate() {
             let (bg, text_col) = match notif.level {
                 NotifLevel::Info => (egui::Color32::from_rgb(40, 80, 40), egui::Color32::WHITE),
                 NotifLevel::Warning => (egui::Color32::from_rgb(100, 80, 20), egui::Color32::WHITE),
@@ -118,7 +118,8 @@ impl NotificationQueue {
             let anchor_y = screen.top() + offset_y;
 
             let id_str = format!(
-                "notif_{:?}_{}",
+                "notif_{}_{:?}_{}",
+                idx,
                 notif.level,
                 &notif.message[..notif.message.len().min(20)]
             );

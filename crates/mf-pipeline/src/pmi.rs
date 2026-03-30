@@ -49,9 +49,12 @@ pub fn compute_pmi(graph: &CooccurrenceGraph) -> Vec<f64> {
                     continue;
                 }
 
-                let p_ab = count_ij / (total * 2.0);
-                let p_a = row_sums[i] / (total * 2.0);
-                let p_b = row_sums[j] / (total * 2.0);
+                // Probabilities use `total` (the true pair count, already
+                // halved from the symmetric matrix sum). Row sums count each
+                // pair once per direction, so they also divide by `total`.
+                let p_ab = count_ij / total;
+                let p_a = row_sums[i] / total;
+                let p_b = row_sums[j] / total;
 
                 if p_a < EPSILON || p_b < EPSILON {
                     continue;
@@ -130,9 +133,9 @@ pub fn compute_ppmi(graph: &CooccurrenceGraph) -> Vec<f64> {
                     continue;
                 }
 
-                let p_ab = count_ij / (total * 2.0);
-                let p_a = row_sums[i] / (total * 2.0);
-                let p_b = row_sums[j] / (total * 2.0);
+                let p_ab = count_ij / total;
+                let p_a = row_sums[i] / total;
+                let p_b = row_sums[j] / total;
 
                 if p_a < EPSILON || p_b < EPSILON {
                     continue;
@@ -237,18 +240,21 @@ mod tests {
 
     #[test]
     fn test_pmi_known_property() {
-        // For words that co-occur frequently, their NPPMI should be positive.
-        // "alpha" and "beta" appear together in windows → NPPMI(alpha,beta) > 0.
-        let toks = tokens(&["alpha", "beta", "alpha", "beta", "alpha", "beta"]);
+        // "alpha" and "beta" co-occur more than expected (they cluster together),
+        // while "gamma" and "delta" appear in separate contexts. With ≥3 words in
+        // the vocabulary, the pair that clusters should have positive NPPMI.
+        let toks = tokens(&[
+            "alpha", "beta", "alpha", "beta", "gamma", "delta", "gamma", "delta",
+        ]);
         let graph = build_cooccurrence(&toks, &basic_config());
         let pmi = compute_pmi(&graph);
         let n = graph.vocab_size;
-        // Find alpha and beta indices.
         let alpha_idx = graph.vocab.iter().position(|t| t.0 == "alpha").unwrap();
         let beta_idx = graph.vocab.iter().position(|t| t.0 == "beta").unwrap();
         assert!(
             pmi[alpha_idx * n + beta_idx] > 0.0,
-            "Frequently co-occurring words should have positive NPPMI"
+            "Clustered co-occurring words should have positive NPPMI, got {}",
+            pmi[alpha_idx * n + beta_idx]
         );
     }
 

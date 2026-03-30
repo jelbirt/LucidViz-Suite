@@ -304,6 +304,10 @@ impl AppState {
     /// Drain progress events from any running background jobs.
     pub fn poll_jobs(&mut self) {
         for job in [&mut self.as_job, &mut self.mf_job].into_iter().flatten() {
+            // Skip polling completed jobs — nothing left to drain.
+            if job.result.is_some() {
+                continue;
+            }
             while let Ok(ev) = job.receiver.try_recv() {
                 match ev {
                     PipelineEvent::Progress { step, pct } => {
@@ -312,9 +316,24 @@ impl AppState {
                     }
                     PipelineEvent::Done(r) => {
                         job.result = Some(r);
+                        break; // No more useful events after Done.
                     }
                 }
             }
+        }
+    }
+
+    /// Clear a completed AS pipeline job. Call after the GUI has consumed the result.
+    pub fn clear_completed_as_job(&mut self) {
+        if self.as_job.as_ref().is_some_and(|j| j.result.is_some()) {
+            self.as_job = None;
+        }
+    }
+
+    /// Clear a completed MF pipeline job. Call after the GUI has consumed the result.
+    pub fn clear_completed_mf_job(&mut self) {
+        if self.mf_job.as_ref().is_some_and(|j| j.result.is_some()) {
+            self.mf_job = None;
         }
     }
 

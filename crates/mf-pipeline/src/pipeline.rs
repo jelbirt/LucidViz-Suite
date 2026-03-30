@@ -79,11 +79,11 @@ pub fn run_mf_pipeline(config: &MfPipelineConfig) -> Result<MfOutput> {
         let ppmi = compute_ppmi(&cooccurrence);
         (compute_count_similarity(&cooccurrence), nppmi_matrix, ppmi)
     };
+    // 7. Build petgraph (must happen before taking ownership of raw counts)
+    let pg = build_petgraph(&cooccurrence, &similarity_matrix, &config.mf_config);
+
     // Take ownership of the raw counts instead of cloning
     let raw_counts = std::mem::take(&mut cooccurrence.matrix);
-
-    // 7. Build petgraph
-    let pg = build_petgraph(&cooccurrence, &similarity_matrix, &config.mf_config);
 
     // 8. Centrality
     let centrality = compute_centrality_full(&pg, &labels);
@@ -228,8 +228,8 @@ fn build_output_from_cooccurrence(
         let ppmi = compute_ppmi(&cooccurrence);
         (compute_count_similarity(&cooccurrence), nppmi_matrix, ppmi)
     };
-    let raw_counts = std::mem::take(&mut cooccurrence.matrix);
     let pg = build_petgraph(&cooccurrence, &similarity_matrix, mf_config);
+    let raw_counts = std::mem::take(&mut cooccurrence.matrix);
     let centrality = compute_centrality_full(&pg, &labels);
 
     Ok(MfOutput {
