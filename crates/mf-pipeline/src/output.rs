@@ -70,8 +70,13 @@ pub fn write_mf_xlsx(output: &MfOutput, path: &Path, raw_counts: &[u64]) -> Resu
                 .map_err(|e| MfError::Xlsx(e.to_string()))?;
             ws.write(row, 1, output.centrality.degree[i])
                 .map_err(|e| MfError::Xlsx(e.to_string()))?;
-            ws.write(row, 2, output.centrality.distance[i])
-                .map_err(|e| MfError::Xlsx(e.to_string()))?;
+            if output.centrality.distance[i].is_nan() {
+                ws.write(row, 2, "N/A")
+                    .map_err(|e| MfError::Xlsx(e.to_string()))?;
+            } else {
+                ws.write(row, 2, output.centrality.distance[i])
+                    .map_err(|e| MfError::Xlsx(e.to_string()))?;
+            }
             ws.write(row, 3, output.centrality.closeness[i])
                 .map_err(|e| MfError::Xlsx(e.to_string()))?;
             ws.write(row, 4, output.centrality.betweenness[i])

@@ -199,7 +199,8 @@ impl MfOutput {
         validate_similarity_matrix("nppmi_matrix", &self.nppmi_matrix, self.n)?;
         validate_finite_matrix("ppmi_matrix", &self.ppmi_matrix, self.n)?;
         validate_finite_vector("centrality.degree", &self.centrality.degree)?;
-        validate_finite_vector("centrality.distance", &self.centrality.distance)?;
+        // Distance may be NaN for disconnected nodes — only reject Infinity.
+        validate_finite_or_nan_vector("centrality.distance", &self.centrality.distance)?;
         validate_finite_vector("centrality.closeness", &self.centrality.closeness)?;
         validate_finite_vector("centrality.betweenness", &self.centrality.betweenness)?;
 
@@ -420,6 +421,15 @@ fn validate_square_len(name: &str, len: usize, n: usize) -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("MF output size overflow for {} labels", n))?;
     if len != expected {
         bail!("MF output {name} expected {expected} values for {n} labels, got {len}");
+    }
+    Ok(())
+}
+
+fn validate_finite_or_nan_vector(name: &str, values: &[f64]) -> Result<()> {
+    for (idx, value) in values.iter().copied().enumerate() {
+        if value.is_infinite() {
+            bail!("MF output {name}[{idx}] is infinite");
+        }
     }
     Ok(())
 }

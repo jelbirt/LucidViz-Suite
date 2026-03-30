@@ -190,13 +190,14 @@ pub fn compute_centrality_full(pg: &UnGraph<String, f64>, labels: &[String]) -> 
                 .map(|(_, &d)| d)
                 .collect();
             if reachable.is_empty() {
-                0.0
+                f64::NAN
             } else {
                 reachable.iter().sum::<f64>() / reachable.len() as f64
             }
         })
         .collect();
 
+    // NaN distance (disconnected node) also yields closeness=0.0 since NaN > 1e-15 is false.
     let closeness: Vec<f64> = distance
         .iter()
         .map(|&d| if d > 1e-15 { 1.0 / d } else { 0.0 })

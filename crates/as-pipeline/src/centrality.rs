@@ -71,13 +71,14 @@ pub fn compute_centrality(
                 .map(|(_, &d)| d)
                 .collect();
             if reachable.is_empty() {
-                0.0
+                f64::NAN
             } else {
                 reachable.iter().sum::<f64>() / reachable.len() as f64
             }
         })
         .collect();
 
+    // NaN distance (disconnected node) also yields closeness=0.0 since NaN > 1e-15 is false.
     let closeness: Vec<f64> = distance
         .iter()
         .map(|&d| if d > 1e-15 { 1.0 / d } else { 0.0 })
@@ -546,7 +547,7 @@ mod tests {
 
         assert_eq!(directed.degree, vec![0.5, 0.5, 0.0]);
         assert_ne!(directed.degree, undirected.degree);
-        assert!(directed.distance[2] == 0.0);
+        assert!(directed.distance[2].is_nan());
     }
 
     #[test]
@@ -561,7 +562,7 @@ mod tests {
             report.betweenness[0]
         );
         assert_eq!(report.degree, vec![0.0]);
-        assert_eq!(report.distance, vec![0.0]);
+        assert!(report.distance[0].is_nan());
         assert_eq!(report.closeness, vec![0.0]);
     }
 
@@ -659,6 +660,20 @@ mod tests {
                 report.pagerank[i]
             );
         }
+    }
+
+    #[test]
+    fn test_disconnected_node_distance_is_nan() {
+        let mut adj = Array2::<f64>::zeros((3, 3));
+        adj[[0, 1]] = 1.0;
+        adj[[1, 0]] = 1.0;
+        let report = compute_centrality(&adj, &labels(3), CentralityMode::UndirectedLegacy)
+            .expect("centrality should compute");
+        assert!(report.distance[0].is_finite());
+        assert!(report.distance[1].is_finite());
+        assert!(report.distance[2].is_nan());
+        assert_eq!(report.closeness[2], 0.0);
+        assert_eq!(report.harmonic[2], 0.0);
     }
 
     #[test]

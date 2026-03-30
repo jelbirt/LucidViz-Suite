@@ -96,8 +96,13 @@ fn write_centralities_xlsx(reports: &[CentralityState], path: &Path) -> Result<(
                         .map_err(|e| crate::error::AsError::Xlsx(e.to_string()))?;
                     ws.write(row, 1, report.degree[i])
                         .map_err(|e| crate::error::AsError::Xlsx(e.to_string()))?;
-                    ws.write(row, 2, report.distance[i])
-                        .map_err(|e| crate::error::AsError::Xlsx(e.to_string()))?;
+                    if report.distance[i].is_nan() {
+                        ws.write(row, 2, "N/A")
+                            .map_err(|e| crate::error::AsError::Xlsx(e.to_string()))?;
+                    } else {
+                        ws.write(row, 2, report.distance[i])
+                            .map_err(|e| crate::error::AsError::Xlsx(e.to_string()))?;
+                    }
                     ws.write(row, 3, report.closeness[i])
                         .map_err(|e| crate::error::AsError::Xlsx(e.to_string()))?;
                     ws.write(row, 4, report.betweenness[i])
