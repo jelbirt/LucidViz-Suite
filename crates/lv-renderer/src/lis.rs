@@ -18,6 +18,19 @@ const STREAM_THRESHOLD_BYTES: usize = 100 * 1024 * 1024; // 100 MB
 /// `compute_frame` instead.
 pub fn build_lis_buffer(dataset: &LvDataset, config: &LisConfig) -> LisBuffer {
     let lis = config.lis_value;
+
+    // Guard: empty dataset gets an empty non-streaming buffer regardless of
+    // estimated size, so `compute_frame` is never called with no sheets.
+    let time_pts = dataset.time_points();
+    if time_pts == 0 {
+        return LisBuffer {
+            frames: vec![],
+            streaming: false,
+            lis,
+            total_frames: 0,
+        };
+    }
+
     let estimated = dataset.estimated_lis_buffer_bytes(lis);
 
     if estimated > STREAM_THRESHOLD_BYTES {
@@ -35,17 +48,7 @@ pub fn build_lis_buffer(dataset: &LvDataset, config: &LisConfig) -> LisBuffer {
         };
     }
 
-    let time_pts = dataset.time_points();
-
-    if time_pts == 0 {
-        return LisBuffer {
-            frames: vec![],
-            streaming: false,
-            lis,
-            total_frames: 0,
-        };
-    }
-
+    // time_pts > 0 is guaranteed by the early return above.
     let indexed_sheets: Vec<HashMap<&str, &LvRow>> =
         dataset.sheets.iter().map(index_sheet_rows).collect();
     let transitions = if time_pts > 1 { time_pts - 1 } else { 1 };
@@ -88,17 +91,18 @@ pub fn build_lis_buffer(dataset: &LvDataset, config: &LisConfig) -> LisBuffer {
 }
 
 /// A small LRU cache for streaming mode to avoid recomputing recent frames.
+///
+/// Uses the `lru` crate for O(1) amortized get/put/eviction instead of
+/// the previous Vec-based O(n) approach.
 pub struct FrameCache {
-    entries: Vec<(u32, LisFrame)>,
-    capacity: usize,
+    inner: lru::LruCache<u32, LisFrame>,
 }
 
 impl FrameCache {
     /// Create a new frame cache with the given capacity (number of frames to keep).
     pub fn new(capacity: usize) -> Self {
         Self {
-            entries: Vec::with_capacity(capacity),
-            capacity,
+            inner: lru::LruCache::new(std::num::NonZeroUsize::new(capacity.max(1)).unwrap()),
         }
     }
 
@@ -109,26 +113,20 @@ impl FrameCache {
         config: &LisConfig,
         slice_index: u32,
     ) -> &LisFrame {
-        // Check if already cached.
-        if let Some(pos) = self.entries.iter().position(|(idx, _)| *idx == slice_index) {
-            // Move to end (most recently used).
-            let entry = self.entries.remove(pos);
-            self.entries.push(entry);
-            return &self.entries.last().unwrap().1;
+        // O(1) lookup + promotion to MRU position.
+        if self.inner.contains(&slice_index) {
+            return self.inner.get(&slice_index).unwrap();
         }
 
-        // Compute and insert.
+        // Compute, insert (auto-evicts LRU if at capacity), and return ref.
         let frame = compute_frame(dataset, config, slice_index);
-        if self.entries.len() >= self.capacity {
-            self.entries.remove(0); // evict oldest
-        }
-        self.entries.push((slice_index, frame));
-        &self.entries.last().unwrap().1
+        self.inner.put(slice_index, frame);
+        self.inner.get(&slice_index).unwrap()
     }
 
     /// Clear all cached frames.
     pub fn clear(&mut self) {
-        self.entries.clear();
+        self.inner.clear();
     }
 }
 
@@ -234,9 +232,9 @@ fn interpolate(
             let z = lerp(a.z, b.z, alpha) as f32;
             let size = lerp(a.size, b.size, alpha) as f32;
             let sa = lerp(a.size_alpha, b.size_alpha, alpha) as f32;
-            let sx = lerp(a.spin_x, b.spin_x, alpha) as f32;
-            let sy = lerp(a.spin_y, b.spin_y, alpha) as f32;
-            let sz = lerp(a.spin_z, b.spin_z, alpha) as f32;
+            let sx = lerp_angle(a.spin_x, b.spin_x, alpha) as f32;
+            let sy = lerp_angle(a.spin_y, b.spin_y, alpha) as f32;
+            let sz = lerp_angle(a.spin_z, b.spin_z, alpha) as f32;
             let r = lerp(a.color_r as f64, b.color_r as f64, alpha) as f32;
             let g = lerp(a.color_g as f64, b.color_g as f64, alpha) as f32;
             let bv = lerp(a.color_b as f64, b.color_b as f64, alpha) as f32;
@@ -255,6 +253,18 @@ fn interpolate(
 #[inline]
 fn lerp(a: f64, b: f64, t: f64) -> f64 {
     a + (b - a) * t
+}
+
+/// Interpolate between two angles (in degrees) via the shortest arc.
+fn lerp_angle(a: f64, b: f64, t: f64) -> f64 {
+    let mut diff = (b - a) % 360.0;
+    if diff > 180.0 {
+        diff -= 360.0;
+    }
+    if diff < -180.0 {
+        diff += 360.0;
+    }
+    a + diff * t
 }
 
 // ─── GpuInstance helpers (extension trait for size override) ─────────────────
@@ -442,12 +452,12 @@ mod tests {
 
         cache.get_or_compute(&ds, &cfg, 0);
         cache.get_or_compute(&ds, &cfg, 1);
-        assert_eq!(cache.entries.len(), 2);
+        assert_eq!(cache.inner.len(), 2);
 
         // Adding a third should evict frame 0.
         cache.get_or_compute(&ds, &cfg, 2);
-        assert_eq!(cache.entries.len(), 2);
-        assert!(cache.entries.iter().all(|(idx, _)| *idx != 0));
+        assert_eq!(cache.inner.len(), 2);
+        assert!(!cache.inner.contains(&0));
     }
 
     #[test]

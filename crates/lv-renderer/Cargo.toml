@@ -23,6 +23,7 @@ log.workspace      = true
 nalgebra.workspace = true
 serde.workspace    = true
 sha2.workspace     = true
+lru.workspace      = true
 pollster.workspace = true
 rand.workspace     = true
 

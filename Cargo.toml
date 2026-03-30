@@ -52,6 +52,9 @@ egui-winit = "0.33"
 # Audio
 midir = "0.10"
 
+# Caching
+lru       = "0.12"
+
 # Utilities
 image     = "0.25"
 bytemuck  = { version = "1.24", features = ["derive"] }

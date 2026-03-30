@@ -103,6 +103,9 @@ impl BeatsScheduler {
         }
 
         // ── decide whether to fire a beat on this slice ───────────────────
+        // Note: `local_slice` resets to 0 at each transition boundary, so beats
+        // always fire on the first frame of every transition.  This gives
+        // per-transition beat alignment rather than globally uniform timing.
         let interval = self.beat_interval();
         if interval == u32::MAX || !local_slice.is_multiple_of(interval) {
             return;

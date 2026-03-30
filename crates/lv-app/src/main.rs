@@ -1448,9 +1448,9 @@ fn advance_slice_index(
     match play_state {
         PlayState::Playing => {
             if looping {
-                (current + advance_slices) % total
+                current.saturating_add(advance_slices) % total
             } else {
-                (current + advance_slices).min(total - 1)
+                current.saturating_add(advance_slices).min(total - 1)
             }
         }
         PlayState::Paused => current.min(total - 1),

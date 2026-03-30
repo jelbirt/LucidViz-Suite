@@ -293,11 +293,12 @@ async fn render_headless_async(
         }
     }
 
-    // Copy texture to buffer for readback
-    let bytes_per_row = 4 * width;
-    let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+    // Copy texture to buffer for readback (use u64 to prevent overflow
+    // on large render targets where 4 * width * height > u32::MAX).
+    let bytes_per_row = 4u64 * width as u64;
+    let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as u64;
     let padded_bpr = bytes_per_row.div_ceil(align) * align;
-    let buf_size = (padded_bpr * height) as u64;
+    let buf_size = padded_bpr * height as u64;
 
     let readback = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("headless_readback"),
@@ -312,7 +313,7 @@ async fn render_headless_async(
             buffer: &readback,
             layout: wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(padded_bpr),
+                bytes_per_row: Some(padded_bpr as u32),
                 rows_per_image: Some(height),
             },
         },

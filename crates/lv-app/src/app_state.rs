@@ -70,6 +70,10 @@ fn neighbor_for_direction(
     selected: &str,
     direction: EgoEdgeDirection,
 ) -> Option<String> {
+    // Self-loops produce zero-length GPU edges and don't identify a neighbor.
+    if edge.from == edge.to {
+        return None;
+    }
     match direction {
         EgoEdgeDirection::Incoming if edge.to == selected => Some(edge.from.clone()),
         EgoEdgeDirection::Outgoing if edge.from == selected => Some(edge.to.clone()),

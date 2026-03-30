@@ -20,8 +20,8 @@ pub fn run_mds(
     dim_mode: MdsDimMode,
 ) -> Result<MdsCoordinates> {
     let n = dist.n;
-    if n == 0 {
-        bail!(AsError::TooFewNodes(0));
+    if n < 2 {
+        bail!(AsError::TooFewNodes(n));
     }
     let dims = resolve_dims(dim_mode, n);
 

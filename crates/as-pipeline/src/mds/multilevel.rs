@@ -91,23 +91,19 @@ pub fn multilevel_mds(
         let sub_dist_level = extract_sub_distance(dist, level_set);
         let mut sub_coords = extract_sub_coords(&coords, level_set, dims);
 
+        let mut prev_stress = kruskal_stress(&sub_dist_level, &sub_coords, level_set.len(), dims);
         for iter in 0..refine_iters {
             let new_sub = guttman_step(&sub_dist_level, &sub_coords, level_set.len(), dims);
-            center_coords(
-                &mut sub_coords.clone(), // stress check only
-                level_set.len(),
-                dims,
-            );
-            let prev_stress = kruskal_stress(&sub_dist_level, &sub_coords, level_set.len(), dims);
-            let cur_stress = kruskal_stress(&sub_dist_level, &new_sub, level_set.len(), dims);
             sub_coords = new_sub;
+            center_coords(&mut sub_coords, level_set.len(), dims);
 
+            let cur_stress = kruskal_stress(&sub_dist_level, &sub_coords, level_set.len(), dims);
             if iter > 0 && (prev_stress - cur_stress).abs() < 1e-6 {
                 log::trace!("multilevel level {} converged at iter {}", level_idx, iter);
                 break;
             }
+            prev_stress = cur_stress;
         }
-        center_coords(&mut sub_coords, level_set.len(), dims);
 
         // Write refined sub-coordinates back into the full buffer.
         for (local, &global) in level_set.iter().enumerate() {

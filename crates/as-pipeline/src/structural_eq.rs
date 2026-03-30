@@ -105,18 +105,27 @@ fn se_dist_euclidean(adj: &Array2<f64>, n: usize, i: usize, j: usize) -> f64 {
 }
 
 /// Correlation-based SE distance: d(i,j) = 1 - pearson_r(profile_i, profile_j).
-/// Profile is the concatenation of row i and column i of the adjacency matrix.
+/// Profile is the concatenation of row i and column i of the adjacency matrix,
+/// excluding the self-edge (adj\[i,i\]) to avoid double-counting the diagonal
+/// element that appears in both the row and column views.
 #[inline]
 fn se_dist_correlation(adj: &Array2<f64>, n: usize, i: usize, j: usize) -> f64 {
-    // Build profiles: [row_i | col_i] and [row_j | col_j]
-    let len = 2 * n;
+    // Build profiles: [row_i \ self | col_i \ self] and [row_j \ self | col_j \ self]
+    // Profile length is 2*(n-1) since we skip k==i in both loops for node i,
+    // and k==j in both loops for node j.  We accumulate directly to avoid
+    // allocating profile vectors.
+    let len = 2 * (n - 1);
     let mut sum_a = 0.0f64;
     let mut sum_b = 0.0f64;
     let mut sum_a2 = 0.0f64;
     let mut sum_b2 = 0.0f64;
     let mut sum_ab = 0.0f64;
 
+    // Row part: adj[i, k] and adj[j, k] for k != i and k != j.
     for k in 0..n {
+        if k == i || k == j {
+            continue;
+        }
         let a = adj[[i, k]];
         let b = adj[[j, k]];
         sum_a += a;
@@ -125,7 +134,11 @@ fn se_dist_correlation(adj: &Array2<f64>, n: usize, i: usize, j: usize) -> f64 {
         sum_b2 += b * b;
         sum_ab += a * b;
     }
+    // Column part: adj[k, i] and adj[k, j] for k != i and k != j.
     for k in 0..n {
+        if k == i || k == j {
+            continue;
+        }
         let a = adj[[k, i]];
         let b = adj[[k, j]];
         sum_a += a;

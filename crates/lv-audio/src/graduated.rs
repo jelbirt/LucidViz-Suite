@@ -24,8 +24,8 @@ impl Default for GraduatedConfig {
 /// Map a `magnitude` value to a MIDI note in `[0, 127]`.
 ///
 /// `magnitude` is clamped to `[magnitude_min, magnitude_max]` then linearly
-/// interpolated across `[-semitone_range, +semitone_range]` centred on
-/// `base_note`.
+/// interpolated from `base_note` (at minimum magnitude) up to
+/// `base_note + semitone_range` (at maximum magnitude).
 pub fn graduated_note(base_note: u8, magnitude: f64, config: &GraduatedConfig) -> u8 {
     let range = (config.magnitude_max - config.magnitude_min).max(1e-9);
     let t = ((magnitude - config.magnitude_min) / range).clamp(0.0, 1.0);

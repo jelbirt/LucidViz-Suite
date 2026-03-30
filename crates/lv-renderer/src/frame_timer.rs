@@ -54,16 +54,13 @@ impl FrameTimer {
 
         let advance_slices = match self.target_fps {
             None => {
-                // Free-running: one slice per vsync, scaled by speed.
-                // Speed of 0.0 means paused — do not advance.
-                if self.speed == 0.0 {
-                    0
-                } else {
-                    self.accumulated_slices += self.speed;
-                    let n = self.accumulated_slices.floor() as u32;
-                    self.accumulated_slices -= n as f32;
-                    n.max(1)
-                }
+                // Free-running: accumulate fractional slices per vsync.
+                // Speed < 1.0 correctly produces 0 advance on most frames,
+                // with occasional 1-slice advances as the accumulator fills.
+                self.accumulated_slices += self.speed;
+                let n = self.accumulated_slices.floor() as u32;
+                self.accumulated_slices -= n as f32;
+                n
             }
             Some(fps) => {
                 // Fixed FPS: accumulate fractional slices.
@@ -106,16 +103,31 @@ mod tests {
     }
 
     #[test]
-    fn default_speed_produces_at_least_one_advance_in_free_running() {
+    fn default_speed_accumulates_correctly_in_free_running() {
         let mut timer = FrameTimer::new();
-        // default speed is 1.0, target_fps is None (free-running)
         assert_eq!(timer.speed, 1.0);
         assert!(timer.target_fps.is_none());
-        let advance = timer.tick();
+        // Over two ticks at speed=1.0 the accumulator should produce at least
+        // 1 total advance (first tick adds 1.0 → floor=1, advance=1).
+        let a1 = timer.tick();
+        let a2 = timer.tick();
         assert!(
-            advance.advance_slices >= 1,
-            "default speed (1.0) in free-running mode should produce advance_slices >= 1, got {}",
-            advance.advance_slices
+            a1.advance_slices + a2.advance_slices >= 1,
+            "speed=1.0 should produce at least 1 advance over 2 ticks, got {} + {}",
+            a1.advance_slices,
+            a2.advance_slices
+        );
+    }
+
+    #[test]
+    fn sub_unity_speed_does_not_force_advance_every_tick() {
+        let mut timer = FrameTimer::new();
+        timer.set_speed(0.1);
+        // First tick: accumulated = 0.1, floor = 0 → advance = 0
+        let advance = timer.tick();
+        assert_eq!(
+            advance.advance_slices, 0,
+            "speed=0.1 should not advance on first tick"
         );
     }
 }

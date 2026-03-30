@@ -25,6 +25,7 @@ rust_xlsxwriter.workspace = true
 anyhow.workspace          = true
 log.workspace             = true
 thiserror.workspace       = true
+rand.workspace            = true
 getrandom = { workspace = true, optional = true, features = ["js"] }
 
 [dev-dependencies]

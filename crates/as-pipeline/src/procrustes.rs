@@ -154,16 +154,94 @@ pub fn procrustes(
 /// Compute only the Procrustes residual without allocating aligned coordinates.
 ///
 /// Useful for reference selection (e.g., `choose_optimal_reference`) where
-/// only the residual matters and the full alignment is discarded.
+/// only the residual matters and the full alignment is discarded.  Operates
+/// on the shared-label subset only (m × dims), avoiding the n × dims
+/// allocation that `procrustes()` performs for the full aligned output.
 pub fn procrustes_residual(
     source: &MdsCoordinates,
     target: &MdsCoordinates,
     allow_scale: bool,
 ) -> Result<f64> {
-    // Use the full procrustes and extract residual. The allocation savings
-    // from skipping the aligned coordinates are marginal for dims=2-3.
-    // This wrapper exists for API clarity and future optimization.
-    procrustes(source, target, allow_scale).map(|r| r.residual)
+    let dims = source.dims.min(target.dims);
+    let target_index: std::collections::HashMap<&str, usize> = target
+        .labels
+        .iter()
+        .enumerate()
+        .map(|(ti, label)| (label.as_str(), ti))
+        .collect();
+    let shared_indices: Vec<(usize, usize)> = source
+        .labels
+        .iter()
+        .enumerate()
+        .filter_map(|(si, lbl)| target_index.get(lbl.as_str()).copied().map(|ti| (si, ti)))
+        .collect();
+    if shared_indices.len() < 2 {
+        bail!(AsError::TooFewSharedLabels(shared_indices.len()));
+    }
+    let m = shared_indices.len();
+
+    // Build small m×dims matrices for the shared subset only.
+    let mut a = DMatrix::<f64>::zeros(m, dims);
+    let mut b = DMatrix::<f64>::zeros(m, dims);
+    for (row, (si, ti)) in shared_indices.iter().enumerate() {
+        for d in 0..dims {
+            a[(row, d)] = source.row(*si)[d];
+            b[(row, d)] = target.row(*ti)[d];
+        }
+    }
+    let mu_a = col_means(&a, m, dims);
+    let mu_b = col_means(&b, m, dims);
+    centre(&mut a, &mu_a, m, dims);
+    centre(&mut b, &mu_b, m, dims);
+
+    let mat_m = a.transpose() * &b;
+    let svd = SVD::new(mat_m, true, true);
+    let u = svd
+        .u
+        .ok_or_else(|| AsError::MdsFailed("SVD: U unavailable".into()))?;
+    let vt = svd
+        .v_t
+        .ok_or_else(|| AsError::MdsFailed("SVD: V_t unavailable".into()))?;
+    let sigma = svd.singular_values;
+    let v = vt.transpose();
+    let det_sign = (&v * u.transpose()).determinant().signum();
+    let mut s_diag = vec![1.0f64; dims];
+    if dims > 0 {
+        s_diag[dims - 1] = det_sign;
+    }
+    let mut vs = v.clone();
+    for d in 0..dims {
+        for row in 0..dims {
+            vs[(row, d)] *= s_diag[d];
+        }
+    }
+    let r_mat = &vs * u.transpose();
+
+    let trace_sigma_s: f64 = (0..dims).map(|d| sigma[d] * s_diag[d]).sum();
+    let frob_a_sq: f64 = a.iter().map(|v| v * v).sum();
+    let ss = if allow_scale && frob_a_sq > 1e-15 {
+        trace_sigma_s / frob_a_sq
+    } else {
+        1.0
+    };
+
+    let mu_a_row = DMatrix::from_row_slice(1, dims, &mu_a);
+    let t_mat = DMatrix::from_row_slice(1, dims, &mu_b) - ss * &mu_a_row * r_mat.transpose();
+    let translation: Vec<f64> = (0..dims).map(|d| t_mat[(0, d)]).collect();
+
+    // Compute residual directly — no n×dims allocation needed.
+    let mut resid = 0.0f64;
+    for (si, ti) in &shared_indices {
+        for d_out in 0..dims {
+            let mut val = translation[d_out];
+            for d_in in 0..dims {
+                val += ss * source.row(*si)[d_in] * r_mat[(d_in, d_out)];
+            }
+            let diff = val - target.row(*ti)[d_out];
+            resid += diff * diff;
+        }
+    }
+    Ok(resid)
 }
 
 /// Weighted Procrustes alignment.
@@ -199,23 +277,44 @@ pub fn procrustes_weighted(
             }
 
             let m = shared_indices.len();
-            let mut a = DMatrix::<f64>::zeros(m, dims);
-            let mut b = DMatrix::<f64>::zeros(m, dims);
             let mut wt = vec![1.0f64; m];
-            for (row, (si, ti)) in shared_indices.iter().enumerate() {
-                let weight_val = if *si < w.len() { w[*si].max(0.0) } else { 1.0 };
-                wt[row] = weight_val;
-                let sqrt_w = weight_val.sqrt();
-                for d in 0..dims {
-                    a[(row, d)] = source.row(*si)[d] * sqrt_w;
-                    b[(row, d)] = target.row(*ti)[d] * sqrt_w;
-                }
+            for (row, (si, _)) in shared_indices.iter().enumerate() {
+                wt[row] = if *si < w.len() { w[*si].max(0.0) } else { 1.0 };
             }
 
-            let mu_a = col_means(&a, m, dims);
-            let mu_b = col_means(&b, m, dims);
-            centre(&mut a, &mu_a, m, dims);
-            centre(&mut b, &mu_b, m, dims);
+            // Compute weighted centroids from original (unscaled) coordinates.
+            let w_sum: f64 = wt.iter().sum::<f64>().max(1e-15);
+            let src_wmeans: Vec<f64> = (0..dims)
+                .map(|d| {
+                    shared_indices
+                        .iter()
+                        .enumerate()
+                        .map(|(row, (si, _))| wt[row] * source.row(*si)[d])
+                        .sum::<f64>()
+                        / w_sum
+                })
+                .collect();
+            let tgt_wmeans: Vec<f64> = (0..dims)
+                .map(|d| {
+                    shared_indices
+                        .iter()
+                        .enumerate()
+                        .map(|(row, (_, ti))| wt[row] * target.row(*ti)[d])
+                        .sum::<f64>()
+                        / w_sum
+                })
+                .collect();
+
+            // Centre using weighted centroids, then apply sqrt-weight scaling.
+            let mut a = DMatrix::<f64>::zeros(m, dims);
+            let mut b = DMatrix::<f64>::zeros(m, dims);
+            for (row, (si, ti)) in shared_indices.iter().enumerate() {
+                let sqrt_w = wt[row].sqrt();
+                for d in 0..dims {
+                    a[(row, d)] = (source.row(*si)[d] - src_wmeans[d]) * sqrt_w;
+                    b[(row, d)] = (target.row(*ti)[d] - tgt_wmeans[d]) * sqrt_w;
+                }
+            }
 
             let mat_m = a.transpose() * &b;
             let svd = SVD::new(mat_m, true, true);
@@ -252,28 +351,10 @@ pub fn procrustes_weighted(
                 1.0
             };
 
-            // Use unweighted means for translation.
-            let src_means: Vec<f64> = (0..dims)
-                .map(|d| {
-                    shared_indices
-                        .iter()
-                        .map(|(si, _)| source.row(*si)[d])
-                        .sum::<f64>()
-                        / m as f64
-                })
-                .collect();
-            let tgt_means: Vec<f64> = (0..dims)
-                .map(|d| {
-                    shared_indices
-                        .iter()
-                        .map(|(_, ti)| target.row(*ti)[d])
-                        .sum::<f64>()
-                        / m as f64
-                })
-                .collect();
-            let mu_a_row = DMatrix::from_row_slice(1, dims, &src_means);
+            // Translation uses weighted centroids (consistent with the rotation).
+            let mu_a_row = DMatrix::from_row_slice(1, dims, &src_wmeans);
             let t_mat =
-                DMatrix::from_row_slice(1, dims, &tgt_means) - ss * &mu_a_row * r.transpose();
+                DMatrix::from_row_slice(1, dims, &tgt_wmeans) - ss * &mu_a_row * r.transpose();
             let translation: Vec<f64> = (0..dims).map(|d| t_mat[(0, d)]).collect();
 
             let n = source.n;

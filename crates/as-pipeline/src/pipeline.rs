@@ -194,7 +194,11 @@ pub fn mf_output_to_distance_matrix(
             if i == j {
                 data.push(0.0);
             } else {
-                data.push(sim_to_dist(similarity_matrix[i * n + j], method));
+                let d = sim_to_dist(similarity_matrix[i * n + j], method);
+                // Similarity of exactly 1.0 between distinct nodes produces
+                // distance 0, which makes them coincident in MDS. Clamp to a
+                // small positive value to avoid degenerate eigenvalues.
+                data.push(if d < 1e-12 { 1e-12 } else { d });
             }
         }
     }

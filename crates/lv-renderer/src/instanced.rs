@@ -4,7 +4,6 @@
 //! can compact after large downshifts in instance count.
 
 use lv_data::{GpuInstance, ShapeKind};
-use wgpu::util::DeviceExt;
 
 const SHAPE_COUNT: usize = ShapeKind::ALL.len(); // 6
 
@@ -46,13 +45,17 @@ impl InstanceBuffer {
             && self.capacities[idx] > (64 * 1024) as u64;
 
         if self.capacities[idx] < need || should_shrink {
-            // (Re)allocate a buffer large enough
-            let buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            // Allocate with 2× headroom (min 64KB) to amortize repeated
+            // small growths when node count changes across frames.
+            let alloc = need.next_power_of_two().max(64 * 1024);
+            let buf = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some(&format!("inst_buf_{idx}")),
-                contents: bytes,
+                size: alloc,
                 usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
             });
-            self.capacities[idx] = need;
+            queue.write_buffer(&buf, 0, bytes);
+            self.capacities[idx] = alloc;
             self.buffers[idx] = Some(buf);
         } else {
             queue.write_buffer(

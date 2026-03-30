@@ -369,12 +369,17 @@ fn parallel_brandes_betweenness(
     directed: bool,
 ) -> Vec<f64> {
     let (sources, scale_factor): (Vec<usize>, f64) = if n > APPROX_BETWEENNESS_THRESHOLD {
-        // Sample pivots evenly across nodes.
+        // Uniform random pivot selection (unbiased). Deterministic seed derived
+        // from graph structure for reproducibility across identical inputs.
+        use rand::{seq::SliceRandom, SeedableRng};
         let k = APPROX_BETWEENNESS_PIVOTS.min(n);
-        let step = n as f64 / k as f64;
-        let pivots: Vec<usize> = (0..k).map(|i| (i as f64 * step) as usize).collect();
+        let seed: u64 = n as u64 ^ weighted_adj.iter().map(|v| v.len() as u64).sum::<u64>();
+        let mut rng = rand::rngs::SmallRng::seed_from_u64(seed);
+        let mut indices: Vec<usize> = (0..n).collect();
+        indices.shuffle(&mut rng);
+        indices.truncate(k);
         let factor = n as f64 / k as f64;
-        (pivots, factor)
+        (indices, factor)
     } else {
         ((0..n).collect(), 1.0)
     };
