@@ -2212,6 +2212,7 @@ dependencies = [
  "criterion",
  "getrandom 0.2.17",
  "lv-data",
+ "nalgebra",
  "petgraph",
  "rand",
  "rayon",

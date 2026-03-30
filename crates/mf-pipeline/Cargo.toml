@@ -15,6 +15,7 @@ wasm      = ["dep:getrandom"]   # wasm32-unknown-unknown compatibility
 [dependencies]
 lv-data.path     = "../lv-data"
 
+nalgebra.workspace              = true
 unicode-normalization.workspace = true
 unicode-segmentation.workspace  = true
 stop-words.workspace            = true

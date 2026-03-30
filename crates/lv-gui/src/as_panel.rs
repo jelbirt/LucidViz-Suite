@@ -144,6 +144,7 @@ impl AsPanel {
                     ProcrustesMode::OptimalChoice,
                     "Optimal Choice",
                 );
+                ui.selectable_value(&mut self.procrustes, ProcrustesMode::GPA, "GPA (Consensus)");
             });
 
         // ── Normalise ──────────────────────────────────────────────────────

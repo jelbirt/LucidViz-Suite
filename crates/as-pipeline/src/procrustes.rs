@@ -151,6 +151,122 @@ pub fn procrustes(
     })
 }
 
+/// Generalized Procrustes Analysis: iteratively align all configurations to
+/// their consensus (mean) until convergence.
+///
+/// Returns one `ProcrustesResult` per configuration. The consensus is the
+/// element-wise mean of the aligned configurations.
+///
+/// Reference: Gower, J. C. (1975). "Generalized Procrustes Analysis."
+/// *Psychometrika*, 40(1), 33-51.
+pub fn gpa(
+    configs: &[MdsCoordinates],
+    allow_scale: bool,
+    max_iter: usize,
+    tolerance: f64,
+) -> Result<Vec<ProcrustesResult>> {
+    let k = configs.len();
+    if k == 0 {
+        return Ok(Vec::new());
+    }
+    if k == 1 {
+        let dims = configs[0].dims;
+        return Ok(vec![ProcrustesResult {
+            aligned: configs[0].clone(),
+            rotation: identity_rotation(dims),
+            scale: 1.0,
+            translation: vec![0.0; dims],
+            residual: 0.0,
+        }]);
+    }
+
+    // Initialize aligned set with raw configs.
+    let mut aligned: Vec<MdsCoordinates> = configs.to_vec();
+    let dims = aligned[0].dims;
+    let n = aligned[0].n;
+
+    for _iter in 0..max_iter {
+        // 1. Compute consensus = element-wise mean of all aligned configs.
+        let consensus = compute_consensus(&aligned)?;
+
+        // 2. Align each config to the consensus.
+        let mut new_aligned = Vec::with_capacity(k);
+        for cfg in configs {
+            let res = procrustes(cfg, &consensus, allow_scale)?;
+            new_aligned.push(res.aligned.clone());
+        }
+
+        // 3. Check convergence: compare aligned coordinates to previous.
+        let delta = coordinate_delta(&aligned, &new_aligned, n, dims);
+        aligned = new_aligned;
+
+        if delta < tolerance {
+            break;
+        }
+    }
+
+    // Final pass: produce ProcrustesResult for each config aligned to the
+    // final consensus.
+    let consensus = compute_consensus(&aligned)?;
+    let mut results = Vec::with_capacity(k);
+    for cfg in configs {
+        results.push(procrustes(cfg, &consensus, allow_scale)?);
+    }
+
+    Ok(results)
+}
+
+/// Compute the element-wise mean of multiple coordinate sets (consensus).
+fn compute_consensus(configs: &[MdsCoordinates]) -> Result<MdsCoordinates> {
+    let k = configs.len();
+    let n = configs[0].n;
+    let dims = configs[0].dims;
+    let labels = configs[0].labels.clone();
+
+    let mut data = vec![0.0f64; n * dims];
+    for cfg in configs {
+        for (i, val) in cfg.data.iter().enumerate() {
+            data[i] += val;
+        }
+    }
+    let inv_k = 1.0 / k as f64;
+    for val in &mut data {
+        *val *= inv_k;
+    }
+
+    MdsCoordinates::new(
+        labels,
+        data,
+        dims,
+        0.0,
+        crate::types::MdsAlgorithm::Classical,
+    )
+    .map_err(|e| anyhow::anyhow!(e))
+}
+
+/// Max absolute coordinate change between two sets of aligned configs.
+fn coordinate_delta(old: &[MdsCoordinates], new: &[MdsCoordinates], n: usize, dims: usize) -> f64 {
+    let mut max_delta = 0.0f64;
+    for (o, ne) in old.iter().zip(new.iter()) {
+        for i in 0..(n * dims) {
+            let d = (o.data[i] - ne.data[i]).abs();
+            if d > max_delta {
+                max_delta = d;
+            }
+        }
+    }
+    max_delta
+}
+
+/// Identity rotation matrix (dims x dims), flattened row-major.
+pub fn identity_rotation(dims: usize) -> Vec<f64> {
+    let mut r = vec![0.0f64; dims * dims];
+    for i in 0..dims {
+        r[i * dims + i] = 1.0;
+    }
+    r
+}
+
 fn col_means(m: &DMatrix<f64>, rows: usize, cols: usize) -> Vec<f64> {
     (0..cols)
         .map(|c| (0..rows).map(|r| m[(r, c)]).sum::<f64>() / rows as f64)
@@ -215,5 +331,98 @@ mod tests {
         let src = make_coords(vec!["a".to_string()], vec![0.0, 0.0], 2);
         let tgt = make_coords(vec!["b".to_string()], vec![1.0, 1.0], 2);
         assert!(procrustes(&src, &tgt, false).is_err());
+    }
+
+    // ── GPA tests ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn gpa_single_config_returns_identity() {
+        let data = vec![0.0, 0.0, 1.0, 0.0, 0.0, 1.0];
+        let cfg = make_coords(labels(3), data, 2);
+        let results = gpa(&[cfg], false, 50, 1e-8).unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(results[0].residual < 1e-10);
+        assert!((results[0].scale - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn gpa_identical_configs_zero_residual() {
+        let data = vec![0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+        let configs: Vec<MdsCoordinates> = (0..4)
+            .map(|_| make_coords(labels(4), data.clone(), 2))
+            .collect();
+        let results = gpa(&configs, false, 50, 1e-8).unwrap();
+        assert_eq!(results.len(), 4);
+        for r in &results {
+            assert!(r.residual < 1e-8, "residual={}", r.residual);
+        }
+    }
+
+    #[test]
+    fn gpa_rotated_configs_converge() {
+        // Config 0: original square. Config 1: slight perturbation.
+        // Config 2: another perturbation. All share same labels.
+        let data0 = vec![1.0, 0.0, -1.0, 0.0, 0.0, 1.0, 0.0, -1.0];
+        let data1 = vec![1.05, 0.02, -0.98, 0.01, 0.03, 1.01, -0.01, -1.02];
+        let data2 = vec![0.97, -0.01, -1.02, 0.03, -0.02, 0.98, 0.01, -0.99];
+
+        let configs = vec![
+            make_coords(labels(4), data0, 2),
+            make_coords(labels(4), data1, 2),
+            make_coords(labels(4), data2, 2),
+        ];
+
+        let results = gpa(&configs, true, 50, 1e-8).unwrap();
+        assert_eq!(results.len(), 3);
+        // All residuals should be small since configs are near-identical.
+        for (i, r) in results.iter().enumerate() {
+            assert!(
+                r.residual < 0.1,
+                "GPA config {i} residual={} too large for near-identical configs",
+                r.residual
+            );
+        }
+    }
+
+    #[test]
+    fn gpa_empty_input() {
+        let results = gpa(&[], false, 50, 1e-8).unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn gpa_eliminates_drift_vs_chained() {
+        // Three configs where chained Procrustes would accumulate drift.
+        // Each is a small perturbation + rotation from the previous.
+        let data0 = vec![0.0, 0.0, 2.0, 0.0, 1.0, 1.5];
+        let data1 = vec![0.1, 0.0, 2.1, 0.1, 1.1, 1.6];
+        let data2 = vec![0.2, 0.1, 2.2, 0.2, 1.2, 1.7];
+        let configs = vec![
+            make_coords(labels(3), data0, 2),
+            make_coords(labels(3), data1, 2),
+            make_coords(labels(3), data2, 2),
+        ];
+
+        let gpa_results = gpa(&configs, true, 50, 1e-8).unwrap();
+        // GPA should produce finite, small residuals.
+        for r in &gpa_results {
+            assert!(r.residual.is_finite());
+        }
+    }
+
+    #[test]
+    fn gpa_3d_configs() {
+        let data0 = vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
+        let data1 = vec![0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0];
+        let configs = vec![
+            make_coords(labels(3), data0, 3),
+            make_coords(labels(3), data1, 3),
+        ];
+        let results = gpa(&configs, false, 50, 1e-8).unwrap();
+        assert_eq!(results.len(), 2);
+        for r in &results {
+            assert!(r.residual.is_finite());
+            assert_eq!(r.aligned.dims, 3);
+        }
     }
 }

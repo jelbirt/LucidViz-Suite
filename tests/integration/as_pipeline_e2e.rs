@@ -342,3 +342,63 @@ fn test_as_pipeline_preserves_directed_edges_in_lv_output() {
     assert_eq!(edges[2].from, "c");
     assert_eq!(edges[2].to, "a");
 }
+
+#[test]
+fn test_as_pipeline_gpa_alignment_converges() {
+    let adj_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/fixtures/sample_adjacency.csv"
+    );
+    let (labels, adj_base) = parse_adjacency_csv(adj_path);
+    let n = labels.len();
+
+    // Create three perturbed copies.
+    let mut adj_2 = adj_base.clone();
+    let mut adj_3 = adj_base.clone();
+    for i in 0..n {
+        for j in (i + 1)..n {
+            adj_2[[i, j]] += 0.03 * (i as f64);
+            adj_2[[j, i]] = adj_2[[i, j]];
+            adj_3[[i, j]] += 0.05 * (j as f64);
+            adj_3[[j, i]] = adj_3[[i, j]];
+        }
+    }
+
+    let result = run_pipeline(&AsPipelineInput {
+        datasets: vec![
+            ("T1".to_string(), adj_base),
+            ("T2".to_string(), adj_2),
+            ("T3".to_string(), adj_3),
+        ],
+        labels,
+        mds_config: MdsConfig::Classical,
+        procrustes_mode: ProcrustesMode::GPA,
+        mds_dims: MdsDimMode::Fixed(3),
+        normalize: true,
+        normalization_mode: NormalizationMode::Global,
+        target_range: 300.0,
+        procrustes_scale: true,
+        centrality_mode: CentralityMode::UndirectedLegacy,
+    })
+    .expect("GPA pipeline failed");
+
+    assert_eq!(result.coordinates.len(), 3);
+    assert_eq!(result.procrustes.len(), 3);
+
+    // All residuals should be finite and non-negative.
+    for (i, proc) in result.procrustes.iter().enumerate() {
+        assert!(
+            proc.residual.is_finite() && proc.residual >= 0.0,
+            "GPA result {i} residual={} invalid",
+            proc.residual
+        );
+    }
+
+    // All coordinates should be finite.
+    for (i, coords) in result.coordinates.iter().enumerate() {
+        assert_eq!(coords.dims, 3, "GPA result {i} should have 3 dims");
+        for &v in &coords.data {
+            assert!(v.is_finite(), "GPA result {i} has non-finite coordinate");
+        }
+    }
+}

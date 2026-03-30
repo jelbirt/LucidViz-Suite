@@ -9,6 +9,7 @@ use mf_pipeline::output::{read_mf_json, read_mf_series_json};
 use mf_pipeline::pipeline::{run_mf_pipeline, run_mf_series_pipeline};
 use mf_pipeline::types::{
     MfConfig, MfOutput, MfPipelineConfig, MfSeriesOutput, MfSliceMode, SimToDistMethod,
+    SimilarityMethod,
 };
 
 use crate::state::{AppState, AsInputSource, PipelineEvent, PipelineJob, PipelineOutcome};
@@ -29,8 +30,15 @@ pub struct MfPanel {
     unicode_normalize: bool,
     shared_vocabulary: bool,
     min_tokens_per_slice: usize,
+    similarity_method: SimilarityMethodUi,
     output_dir: Option<PathBuf>,
     status: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SimilarityMethodUi {
+    Nppmi,
+    PpmiSvd,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -65,6 +73,10 @@ impl Default for MfPanel {
             unicode_normalize: defaults.unicode_normalize,
             shared_vocabulary: defaults.shared_vocabulary,
             min_tokens_per_slice: defaults.min_tokens_per_slice,
+            similarity_method: match defaults.similarity_method {
+                SimilarityMethod::Nppmi => SimilarityMethodUi::Nppmi,
+                SimilarityMethod::PpmiSvd => SimilarityMethodUi::PpmiSvd,
+            },
             output_dir: None,
             status: "Ready.".into(),
         }
@@ -132,6 +144,26 @@ impl MfPanel {
             );
         });
         ui.checkbox(&mut self.use_pmi, "Use PMI (vs raw counts)");
+
+        if self.use_pmi {
+            egui::ComboBox::from_label("Similarity method")
+                .selected_text(match self.similarity_method {
+                    SimilarityMethodUi::Nppmi => "NPPMI (raw)",
+                    SimilarityMethodUi::PpmiSvd => "PPMI + SVD (denoised)",
+                })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(
+                        &mut self.similarity_method,
+                        SimilarityMethodUi::Nppmi,
+                        "NPPMI (raw)",
+                    );
+                    ui.selectable_value(
+                        &mut self.similarity_method,
+                        SimilarityMethodUi::PpmiSvd,
+                        "PPMI + SVD (denoised)",
+                    );
+                });
+        }
 
         egui::CollapsingHeader::new("Advanced options")
             .default_open(false)
@@ -346,6 +378,10 @@ impl MfPanel {
             slice_size: self.slice_size,
             min_tokens_per_slice: self.min_tokens_per_slice,
             shared_vocabulary: self.shared_vocabulary,
+            similarity_method: match self.similarity_method {
+                SimilarityMethodUi::Nppmi => SimilarityMethod::Nppmi,
+                SimilarityMethodUi::PpmiSvd => SimilarityMethod::PpmiSvd,
+            },
         }
     }
 }

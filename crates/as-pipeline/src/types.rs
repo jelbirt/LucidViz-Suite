@@ -218,6 +218,10 @@ pub enum ProcrustesMode {
     TimeSeriesAnchored,
     /// Find the pair with best alignment and propagate.
     OptimalChoice,
+    /// Generalized Procrustes Analysis: iteratively align all configurations
+    /// to their consensus (mean) until convergence. Eliminates both chain
+    /// drift and anchor bias.
+    GPA,
     /// Skip Procrustes entirely.
     None,
 }

@@ -12,6 +12,7 @@ pub mod output;
 pub mod pipeline;
 pub mod pmi;
 pub mod stopwords;
+pub mod svd_similarity;
 pub mod tokenize;
 pub mod types;
 

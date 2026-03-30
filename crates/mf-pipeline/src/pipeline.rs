@@ -9,8 +9,11 @@ use crate::normalize::normalize_text;
 use crate::output::{write_mf_json, write_mf_series_json, write_mf_xlsx};
 use crate::pmi::{compute_count_similarity, compute_pmi, compute_ppmi};
 use crate::stopwords::filter_stopwords;
+use crate::svd_similarity::{auto_svd_rank, ppmi_svd_similarity};
 use crate::tokenize::tokenize;
-use crate::types::{MfOutput, MfPipelineConfig, MfSeriesOutput, MfSlice, MfSliceMode, Token};
+use crate::types::{
+    MfOutput, MfPipelineConfig, MfSeriesOutput, MfSlice, MfSliceMode, SimilarityMethod, Token,
+};
 use anyhow::{bail, Result};
 
 /// Run the full MatrixForge pipeline.
@@ -57,13 +60,21 @@ pub fn run_mf_pipeline(config: &MfPipelineConfig) -> Result<MfOutput> {
     let n = cooccurrence.vocab_size;
     let labels: Vec<String> = cooccurrence.vocab.iter().map(|t| t.0.clone()).collect();
 
-    // 6. PMI / similarity — avoid redundant N² clones
+    // 6. PMI / similarity
     let nppmi_matrix = compute_pmi(&cooccurrence);
     let ppmi_matrix = compute_ppmi(&cooccurrence);
     let (similarity_matrix, nppmi_matrix) = if config.mf_config.use_pmi {
-        // When using PMI, similarity IS nppmi — share the same allocation
-        let sim = nppmi_matrix;
-        (sim.clone(), sim)
+        match config.mf_config.similarity_method {
+            SimilarityMethod::PpmiSvd => {
+                let rank = auto_svd_rank(n);
+                let svd_sim = ppmi_svd_similarity(&ppmi_matrix, n, rank);
+                (svd_sim, nppmi_matrix)
+            }
+            SimilarityMethod::Nppmi => {
+                let sim = nppmi_matrix;
+                (sim.clone(), sim)
+            }
+        }
     } else {
         (compute_count_similarity(&cooccurrence), nppmi_matrix)
     };
@@ -201,8 +212,17 @@ fn build_output_from_cooccurrence(
     let nppmi_matrix = compute_pmi(&cooccurrence);
     let ppmi_matrix = compute_ppmi(&cooccurrence);
     let (similarity_matrix, nppmi_matrix) = if mf_config.use_pmi {
-        let sim = nppmi_matrix;
-        (sim.clone(), sim)
+        match mf_config.similarity_method {
+            SimilarityMethod::PpmiSvd => {
+                let rank = auto_svd_rank(n);
+                let svd_sim = ppmi_svd_similarity(&ppmi_matrix, n, rank);
+                (svd_sim, nppmi_matrix)
+            }
+            SimilarityMethod::Nppmi => {
+                let sim = nppmi_matrix;
+                (sim.clone(), sim)
+            }
+        }
     } else {
         (compute_count_similarity(&cooccurrence), nppmi_matrix)
     };

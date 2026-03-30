@@ -101,6 +101,20 @@ pub struct MfConfig {
     pub min_tokens_per_slice: usize,
     /// Reuse one global vocabulary across all slices.
     pub shared_vocabulary: bool,
+    /// Similarity matrix method: raw NPPMI or PPMI + truncated SVD (denoised).
+    pub similarity_method: SimilarityMethod,
+}
+
+/// Method for computing the final similarity matrix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum SimilarityMethod {
+    /// Use raw NPPMI as similarity (current default).
+    #[default]
+    Nppmi,
+    /// Apply truncated SVD to the PPMI matrix, then cosine similarity on
+    /// the low-rank embeddings. Produces a denoised, denser similarity
+    /// matrix that is particularly beneficial for small corpora.
+    PpmiSvd,
 }
 
 impl Default for MfConfig {
@@ -118,6 +132,7 @@ impl Default for MfConfig {
             slice_size: 500,
             min_tokens_per_slice: 1,
             shared_vocabulary: true,
+            similarity_method: SimilarityMethod::default(),
         }
     }
 }

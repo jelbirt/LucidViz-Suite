@@ -471,3 +471,102 @@ fn test_single_output_and_single_slice_series_produce_same_distance_dataset() {
         series_result.lv_dataset.sheets
     );
 }
+
+#[test]
+fn test_mf_pipeline_ppmi_svd_produces_valid_similarity() {
+    use mf_pipeline::types::SimilarityMethod;
+
+    let cfg = MfPipelineConfig {
+        input_paths: vec![corpus_path()],
+        output_dir: None,
+        mf_config: MfConfig {
+            window_size: 3,
+            slide_rate: 1,
+            use_pmi: true,
+            min_count: 2,
+            min_pmi: 0.0,
+            language: "en".to_string(),
+            unicode_normalize: true,
+            similarity_method: SimilarityMethod::PpmiSvd,
+            ..MfConfig::default()
+        },
+        write_json: false,
+        write_xlsx: false,
+    };
+
+    let output = run_mf_pipeline(&cfg).expect("MF pipeline with PPMI+SVD failed");
+
+    let n = output.n;
+    assert!(n > 0, "vocabulary should be non-empty");
+    assert_eq!(output.similarity_matrix.len(), n * n);
+
+    // Similarity values must be in [0, 1] and symmetric.
+    for i in 0..n {
+        for j in 0..n {
+            let v = output.similarity_matrix[i * n + j];
+            assert!(!v.is_nan(), "NaN at [{i},{j}]");
+            assert!(v >= 0.0 && v <= 1.0 + 1e-9, "sim[{i},{j}]={v} out of [0,1]");
+            let other = output.similarity_matrix[j * n + i];
+            assert!(
+                (v - other).abs() < 1e-12,
+                "not symmetric at [{i},{j}]: {v} vs {other}"
+            );
+        }
+        // Diagonal must be 1.0 (self-similarity).
+        let diag = output.similarity_matrix[i * n + i];
+        assert!(
+            (diag - 1.0).abs() < 1e-9,
+            "diagonal [{i},{i}]={diag} should be 1.0"
+        );
+    }
+
+    // NPPMI matrix should still be independently computed.
+    assert_eq!(output.nppmi_matrix.len(), n * n);
+    // SVD similarity should generally be denser (more non-zero entries) than NPPMI.
+    let svd_nonzero = output
+        .similarity_matrix
+        .iter()
+        .filter(|&&v| v > 1e-6)
+        .count();
+    let nppmi_nonzero = output.nppmi_matrix.iter().filter(|&&v| v > 1e-6).count();
+    assert!(
+        svd_nonzero >= nppmi_nonzero,
+        "SVD similarity ({svd_nonzero} non-zero) should be at least as dense as NPPMI ({nppmi_nonzero})"
+    );
+}
+
+#[test]
+fn test_mf_pipeline_ppmi_svd_bridges_to_as() {
+    use mf_pipeline::types::SimilarityMethod;
+
+    let output = run_mf_pipeline(&MfPipelineConfig {
+        input_paths: vec![corpus_path()],
+        output_dir: None,
+        mf_config: MfConfig {
+            min_count: 2,
+            similarity_method: SimilarityMethod::PpmiSvd,
+            ..MfConfig::default()
+        },
+        write_json: false,
+        write_xlsx: false,
+    })
+    .expect("MF pipeline with SVD failed");
+
+    let dist = mf_output_to_distance_matrix(
+        output.labels.clone(),
+        &output.similarity_matrix,
+        output.n,
+        output.sim_to_dist,
+    )
+    .expect("distance conversion from SVD similarity should succeed");
+
+    assert_eq!(dist.n, output.n);
+    // Distance matrix diagonal should be 0.
+    for i in 0..dist.n {
+        assert!(
+            dist.get(i, i).abs() < 1e-12,
+            "distance diagonal [{i},{i}]={} should be 0",
+            dist.get(i, i)
+        );
+    }
+}

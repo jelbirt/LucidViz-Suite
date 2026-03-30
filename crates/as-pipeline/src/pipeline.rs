@@ -9,7 +9,7 @@ use lv_data::SimToDistMethod;
 use crate::centrality::compute_centrality;
 use crate::mds::run_mds;
 use crate::normalize::{normalize_coordinate_series, normalize_coordinates};
-use crate::procrustes::procrustes;
+use crate::procrustes::{gpa, procrustes};
 use crate::structural_eq::compute_se_matrix;
 use crate::types::{
     AsDistancePipelineInput, AsPipelineInput, AsPipelineResult, CentralityState, DistanceMatrix,
@@ -232,11 +232,7 @@ fn finite_info_distance(s: f64) -> f64 {
 // ---------------------------------------------------------------------------
 
 fn identity_rotation(dims: usize) -> Vec<f64> {
-    let mut r = vec![0.0f64; dims * dims];
-    for i in 0..dims {
-        r[i * dims + i] = 1.0;
-    }
-    r
+    crate::procrustes::identity_rotation(dims)
 }
 
 fn unavailable_centrality_state(labels: &[String]) -> CentralityState {
@@ -321,6 +317,7 @@ fn align_coordinates(
             }
             proc_results
         }
+        ProcrustesMode::GPA => gpa(raw_coords, procrustes_scale, 50, 1e-8)?,
     };
 
     Ok(results)
@@ -614,6 +611,80 @@ mod tests {
         assert_eq!(results[1].residual, 0.0);
         assert!(results[0].residual > 0.0);
         assert!(results[2].residual > 0.0);
+    }
+
+    #[test]
+    fn gpa_alignment_produces_finite_results() {
+        let coords = vec![
+            MdsCoordinates::new(
+                vec!["a".into(), "b".into(), "c".into()],
+                vec![0.0, 0.0, 1.0, 0.0, 0.1, 0.9],
+                2,
+                0.0,
+                MdsAlgorithm::Classical,
+            )
+            .unwrap(),
+            MdsCoordinates::new(
+                vec!["a".into(), "b".into(), "c".into()],
+                vec![0.0, 0.0, 1.0, 0.0, 0.5, 0.8],
+                2,
+                0.0,
+                MdsAlgorithm::Classical,
+            )
+            .unwrap(),
+            MdsCoordinates::new(
+                vec!["a".into(), "b".into(), "c".into()],
+                vec![0.0, 0.0, 1.0, 0.0, 0.9, 0.6],
+                2,
+                0.0,
+                MdsAlgorithm::Classical,
+            )
+            .unwrap(),
+        ];
+
+        let results =
+            align_coordinates(&coords, ProcrustesMode::GPA, false).expect("GPA should align");
+
+        assert_eq!(results.len(), 3);
+        for (i, r) in results.iter().enumerate() {
+            assert!(
+                r.residual.is_finite(),
+                "GPA result {i} has non-finite residual"
+            );
+            assert_eq!(r.aligned.n, 3);
+            assert_eq!(r.aligned.dims, 2);
+            for &v in &r.aligned.data {
+                assert!(v.is_finite(), "GPA result {i} has non-finite coordinate");
+            }
+        }
+    }
+
+    #[test]
+    fn gpa_identical_configs_all_zero_residual() {
+        let data = vec![0.0, 0.0, 1.0, 0.0, 0.0, 1.0];
+        let configs: Vec<MdsCoordinates> = (0..3)
+            .map(|_| {
+                MdsCoordinates::new(
+                    vec!["a".into(), "b".into(), "c".into()],
+                    data.clone(),
+                    2,
+                    0.0,
+                    MdsAlgorithm::Classical,
+                )
+                .unwrap()
+            })
+            .collect();
+
+        let results =
+            align_coordinates(&configs, ProcrustesMode::GPA, false).expect("GPA should align");
+
+        for (i, r) in results.iter().enumerate() {
+            assert!(
+                r.residual < 1e-8,
+                "GPA result {i} residual={} should be ~0 for identical configs",
+                r.residual
+            );
+        }
     }
 
     #[test]
