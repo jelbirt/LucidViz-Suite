@@ -64,7 +64,7 @@ pub fn smacof(dist: &SeMatrix, dims: usize, cfg: &SmacofConfig) -> Result<MdsCoo
 
 /// One Guttman transform step: X_new = (1/N) * B(X) * X
 /// Parallelised over rows via rayon.
-fn guttman_step(dist: &SeMatrix, x: &[f64], n: usize, dims: usize) -> Vec<f64> {
+pub(crate) fn guttman_step(dist: &SeMatrix, x: &[f64], n: usize, dims: usize) -> Vec<f64> {
     let n_f = n as f64;
     // Precompute current pairwise distances (parallelized over rows).
     let d_hat: Vec<f64> = (0..n)
@@ -110,7 +110,7 @@ fn guttman_step(dist: &SeMatrix, x: &[f64], n: usize, dims: usize) -> Vec<f64> {
     new_x
 }
 
-fn center_coords(x: &mut [f64], n: usize, dims: usize) {
+pub(crate) fn center_coords(x: &mut [f64], n: usize, dims: usize) {
     for d in 0..dims {
         let mean: f64 = (0..n).map(|i| x[i * dims + d]).sum::<f64>() / n as f64;
         for i in 0..n {

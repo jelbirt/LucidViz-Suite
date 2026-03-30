@@ -29,6 +29,9 @@ pub struct AsPanel {
     normalization_mode: NormalizationMode,
     norm_range: f64,
     centrality_mode: CentralityMode,
+    // Multilevel sub-config
+    ml_levels: usize,
+    ml_refine_iters: u32,
     // SMACOF sub-config
     smacof_max_iter: u32,
     smacof_tol: f64,
@@ -45,6 +48,7 @@ enum MdsAlgorithmUi {
     Classical,
     Smacof,
     Pivot,
+    Multilevel,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -58,6 +62,8 @@ impl Default for AsPanel {
     fn default() -> Self {
         Self {
             algorithm: MdsAlgorithmUi::Auto,
+            ml_levels: 4,
+            ml_refine_iters: 20,
             dim_mode: MdsDimModeUi::Three,
             procrustes: ProcrustesMode::None,
             normalize: true,
@@ -87,7 +93,26 @@ impl AsPanel {
                 ui.selectable_value(&mut self.algorithm, MdsAlgorithmUi::Classical, "Classical");
                 ui.selectable_value(&mut self.algorithm, MdsAlgorithmUi::Smacof, "SMACOF");
                 ui.selectable_value(&mut self.algorithm, MdsAlgorithmUi::Pivot, "Pivot");
+                ui.selectable_value(
+                    &mut self.algorithm,
+                    MdsAlgorithmUi::Multilevel,
+                    "Multilevel",
+                );
             });
+
+        // Multilevel sub-config
+        if self.algorithm == MdsAlgorithmUi::Multilevel {
+            ui.indent("multilevel", |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Levels:");
+                    ui.add(egui::DragValue::new(&mut self.ml_levels).range(1..=8));
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Refine iters:");
+                    ui.add(egui::DragValue::new(&mut self.ml_refine_iters).range(1..=200));
+                });
+            });
+        }
 
         // SMACOF sub-config
         if self.algorithm == MdsAlgorithmUi::Smacof {
@@ -308,6 +333,10 @@ impl AsPanel {
                 init,
             }),
             MdsAlgorithmUi::Pivot => MdsConfig::PivotMds { n_pivots: 50 },
+            MdsAlgorithmUi::Multilevel => MdsConfig::Multilevel {
+                levels: self.ml_levels,
+                refine_iters: self.ml_refine_iters,
+            },
         }
     }
 

@@ -45,7 +45,7 @@ pub fn pivot_mds(dist: &SeMatrix, dims: usize, n_pivots: usize) -> Result<MdsCoo
 
 /// Farthest-point sampling: start with the node whose row sum is largest
 /// (most central), then greedily add the node farthest from the current set.
-fn farthest_point_pivots(dist: &SeMatrix, k: usize) -> Vec<usize> {
+pub(crate) fn farthest_point_pivots(dist: &SeMatrix, k: usize) -> Vec<usize> {
     let n = dist.n;
     // Start: node with maximum total distance (most "spread" from all others).
     let start = (0..n)

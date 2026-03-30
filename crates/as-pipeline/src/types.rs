@@ -130,6 +130,7 @@ pub enum MdsAlgorithm {
     Classical,
     Smacof,
     PivotMds,
+    Multilevel,
 }
 
 // ---------------------------------------------------------------------------
@@ -174,6 +175,10 @@ pub enum MdsConfig {
     Smacof(SmacofConfig),
     PivotMds {
         n_pivots: usize,
+    },
+    Multilevel {
+        levels: usize,
+        refine_iters: u32,
     },
 }
 

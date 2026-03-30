@@ -1,6 +1,7 @@
 //! MDS module dispatcher.
 
 pub mod classical;
+pub mod multilevel;
 pub mod pivot;
 pub mod smacof;
 
@@ -36,6 +37,10 @@ pub fn run_mds(
         MdsConfig::Classical => classical::classical_mds(dist, dims),
         MdsConfig::Smacof(smacof_cfg) => smacof::smacof(dist, dims, smacof_cfg),
         MdsConfig::PivotMds { n_pivots } => pivot::pivot_mds(dist, dims, *n_pivots),
+        MdsConfig::Multilevel {
+            levels,
+            refine_iters,
+        } => multilevel::multilevel_mds(dist, dims, *levels, *refine_iters),
     }
 }
 
