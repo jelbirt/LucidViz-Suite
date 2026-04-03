@@ -512,9 +512,9 @@ mod tests {
             .betweenness
             .iter()
             .enumerate()
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(Ordering::Equal))
             .map(|(i, _)| i)
-            .unwrap();
+            .expect("betweenness vector must not be empty");
         assert_eq!(max_idx, 2, "Middle node should have highest betweenness");
     }
 

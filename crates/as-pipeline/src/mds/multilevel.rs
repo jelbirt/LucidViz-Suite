@@ -9,6 +9,8 @@
 //!    a few SMACOF/Guttman refinement iterations.
 //! 4. Return the final coordinates with Kruskal stress.
 
+use std::cmp::Ordering;
+
 use anyhow::Result;
 use rayon::prelude::*;
 
@@ -217,7 +219,7 @@ fn interpolate_new_points(
                 .iter()
                 .map(|&q| (q, dist.get(p, q)))
                 .collect();
-            neighbours.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+            neighbours.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal));
             neighbours.truncate(k);
 
             // Distance-weighted average (inverse-distance weighting).
@@ -338,5 +340,14 @@ mod tests {
         assert_eq!(coords.n, n);
         assert!(coords.stress.is_finite());
         assert!(coords.stress >= 0.0);
+    }
+
+    #[test]
+    fn test_distance_matrix_rejects_nan() {
+        let n = 3;
+        let mut vals = vec![0.0; n * n];
+        vals[1] = f64::NAN; // inject NaN at [0,1]
+        let result = DistanceMatrix::new(labels(n), vals);
+        assert!(result.is_err(), "NaN in distance matrix must be rejected");
     }
 }

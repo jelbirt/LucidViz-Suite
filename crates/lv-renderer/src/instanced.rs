@@ -99,3 +99,36 @@ impl Default for InstanceBuffer {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_instance_buffer_has_zero_counts() {
+        let ib = InstanceBuffer::new();
+        for shape in ShapeKind::ALL {
+            assert_eq!(
+                ib.instance_count(shape),
+                0,
+                "shape {:?} should start with 0 instances",
+                shape
+            );
+        }
+    }
+
+    #[test]
+    fn shape_count_matches_all_variants() {
+        assert_eq!(SHAPE_COUNT, ShapeKind::ALL.len());
+        assert_eq!(SHAPE_COUNT, 6, "expected 6 shape kinds");
+    }
+
+    #[test]
+    fn default_matches_new() {
+        let a = InstanceBuffer::new();
+        let b = InstanceBuffer::default();
+        for shape in ShapeKind::ALL {
+            assert_eq!(a.instance_count(shape), b.instance_count(shape));
+        }
+    }
+}

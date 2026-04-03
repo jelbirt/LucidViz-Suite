@@ -18,7 +18,7 @@ static STOPWORD_CACHE: std::sync::LazyLock<Mutex<HashMap<String, Option<HashSet<
 /// The stop-word set is cached across calls to avoid rebuilding on every invocation.
 pub fn filter_stopwords(tokens: Vec<Token>, language: &str) -> Vec<Token> {
     let sw_set = {
-        let mut cache = STOPWORD_CACHE.lock().unwrap();
+        let mut cache = STOPWORD_CACHE.lock().unwrap_or_else(|e| e.into_inner());
         cache
             .entry(language.to_string())
             .or_insert_with(|| {

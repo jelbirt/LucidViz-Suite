@@ -236,3 +236,135 @@ pub enum CameraKey {
 pub enum AppAction {
     Exit,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_camera_eye_is_finite_and_above_target() {
+        let cam = ArcballCamera::new(16.0 / 9.0);
+        let eye = cam.eye();
+        assert!(eye.x.is_finite());
+        assert!(eye.y.is_finite());
+        assert!(eye.z.is_finite());
+        // Default pitch is 20 degrees, so eye should be above target.
+        assert!(
+            eye.y > cam.target.y,
+            "eye.y={} should be above target.y={}",
+            eye.y,
+            cam.target.y
+        );
+    }
+
+    #[test]
+    fn view_projection_matrices_are_finite() {
+        let cam = ArcballCamera::new(1.0);
+        let vp = cam.view_proj();
+        for i in 0..4 {
+            for j in 0..4 {
+                assert!(vp[(i, j)].is_finite(), "view_proj[{i},{j}] is not finite");
+            }
+        }
+    }
+
+    #[test]
+    fn orbit_changes_yaw_and_pitch() {
+        let mut cam = ArcballCamera::new(1.0);
+        let orig_yaw = cam.yaw;
+        let orig_pitch = cam.pitch;
+        cam.mouse_press_left(100.0, 100.0);
+        let changed = cam.mouse_moved(120.0, 110.0);
+        assert!(changed);
+        assert!(
+            (cam.yaw - orig_yaw).abs() > 0.01,
+            "yaw should change after left-drag"
+        );
+        assert!(
+            (cam.pitch - orig_pitch).abs() > 0.01,
+            "pitch should change after left-drag"
+        );
+    }
+
+    #[test]
+    fn pitch_clamped_to_limit() {
+        let mut cam = ArcballCamera::new(1.0);
+        cam.pitch = 84.0;
+        cam.mouse_press_left(100.0, 100.0);
+        // Drag upward (negative dy) to increase pitch.
+        cam.mouse_moved(100.0, 0.0);
+        assert!(cam.pitch <= 85.0, "pitch {} exceeds limit", cam.pitch);
+    }
+
+    #[test]
+    fn zoom_reduces_distance() {
+        let mut cam = ArcballCamera::new(1.0);
+        let before = cam.distance;
+        cam.scroll(1.0); // positive = zoom in
+        assert!(cam.distance < before, "zoom in should reduce distance");
+        assert!(cam.distance > 0.0, "distance must remain positive");
+    }
+
+    #[test]
+    fn zoom_out_increases_distance() {
+        let mut cam = ArcballCamera::new(1.0);
+        let before = cam.distance;
+        cam.scroll(-1.0); // negative = zoom out
+        assert!(cam.distance > before, "zoom out should increase distance");
+    }
+
+    #[test]
+    fn reset_restores_defaults() {
+        let mut cam = ArcballCamera::new(1.0);
+        cam.yaw = 45.0;
+        cam.pitch = -30.0;
+        cam.distance = 100.0;
+        cam.target = Point3::new(10.0, 20.0, 30.0);
+        cam.reset();
+        assert_eq!(cam.yaw, 0.0);
+        assert_eq!(cam.pitch, 20.0);
+        assert_eq!(cam.distance, 800.0);
+        assert_eq!(cam.target, Point3::origin());
+    }
+
+    #[test]
+    fn key_exit_returns_app_action() {
+        let mut cam = ArcballCamera::new(1.0);
+        let (changed, action) = cam.key_pressed(CameraKey::Exit);
+        assert!(!changed);
+        assert_eq!(action, Some(AppAction::Exit));
+    }
+
+    #[test]
+    fn set_aspect_updates_ratio() {
+        let mut cam = ArcballCamera::new(1.0);
+        cam.set_aspect(1920, 1080);
+        let expected = 1920.0 / 1080.0;
+        assert!(
+            (cam.aspect - expected).abs() < 1e-5,
+            "aspect should be {expected}, got {}",
+            cam.aspect
+        );
+    }
+
+    #[test]
+    fn speed_up_and_slow_down() {
+        let mut cam = ArcballCamera::new(1.0);
+        let base = cam.speed;
+        cam.key_pressed(CameraKey::SpeedUp);
+        assert!(cam.speed > base);
+        let fast = cam.speed;
+        cam.key_pressed(CameraKey::SlowDown);
+        assert!(cam.speed < fast);
+    }
+
+    #[test]
+    fn pan_moves_target() {
+        let mut cam = ArcballCamera::new(1.0);
+        let orig_target = cam.target;
+        cam.mouse_press_right(100.0, 100.0);
+        let changed = cam.mouse_moved(150.0, 150.0);
+        assert!(changed);
+        assert_ne!(cam.target, orig_target, "target should move after pan");
+    }
+}

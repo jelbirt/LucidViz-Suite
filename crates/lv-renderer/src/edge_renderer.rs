@@ -201,3 +201,47 @@ impl Default for EdgeRenderer {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gpu_edge_size_matches_layout() {
+        // GpuEdge: 3 floats (from) + 3 floats (to) + 4 floats (color) = 10 * 4 = 40 bytes
+        assert_eq!(
+            std::mem::size_of::<GpuEdge>(),
+            40,
+            "GpuEdge should be 40 bytes"
+        );
+    }
+
+    #[test]
+    fn edge_vertex_size_matches_stride() {
+        // EdgeVertex: 3+3+4+1 = 11 floats = 44 bytes, matching EDGE_VERTEX_LAYOUT stride
+        assert_eq!(
+            std::mem::size_of::<EdgeVertex>(),
+            44,
+            "EdgeVertex should be 44 bytes (matches shader stride)"
+        );
+        assert_eq!(EDGE_VERTEX_LAYOUT.array_stride, 44);
+    }
+
+    #[test]
+    fn edge_vertex_attributes_cover_all_fields() {
+        // 4 attributes: from_pos(0), to_pos(12), color(24), side(40)
+        assert_eq!(EDGE_VERTEX_ATTRS.len(), 4);
+        assert_eq!(EDGE_VERTEX_ATTRS[0].offset, 0);
+        assert_eq!(EDGE_VERTEX_ATTRS[1].offset, 12);
+        assert_eq!(EDGE_VERTEX_ATTRS[2].offset, 24);
+        assert_eq!(EDGE_VERTEX_ATTRS[3].offset, 40);
+    }
+
+    #[test]
+    fn new_edge_renderer_has_zero_count() {
+        let er = EdgeRenderer::new();
+        assert_eq!(er.count, 0);
+        assert!(er.vertex_buf.is_none());
+        assert!(er.index_buf.is_none());
+    }
+}
