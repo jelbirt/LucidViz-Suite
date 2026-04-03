@@ -270,6 +270,91 @@ impl Default for ClusterState {
     }
 }
 
+/// Lightweight snapshot of undoable state (excludes dataset, LIS buffer, and
+/// pipeline jobs to keep snapshots cheap).
+#[derive(Clone, Debug)]
+pub struct AppStateSnapshot {
+    pub lis_config: LisConfig,
+    pub play_state: PlayState,
+    pub cluster: ClusterSnapshot,
+    pub overrides: HashMap<String, ObjectOverride>,
+    pub as_input_source: AsInputSource,
+    pub slice_index: u32,
+}
+
+/// Subset of ClusterState that is cheap to clone for undo.
+#[derive(Clone, Debug)]
+pub struct ClusterSnapshot {
+    pub min: f64,
+    pub max: f64,
+    pub ego_mode: bool,
+    pub ego_direction: EgoEdgeDirection,
+    pub secondary_edges: bool,
+    pub shared_only: bool,
+}
+
+/// Fixed-capacity undo/redo stack.
+pub struct UndoStack {
+    stack: Vec<AppStateSnapshot>,
+    cursor: usize,
+    max_depth: usize,
+}
+
+impl UndoStack {
+    pub fn new(max_depth: usize) -> Self {
+        Self {
+            stack: Vec::new(),
+            cursor: 0,
+            max_depth,
+        }
+    }
+
+    /// Push a new snapshot, discarding any redo history.
+    pub fn push(&mut self, snapshot: AppStateSnapshot) {
+        // Discard redo entries beyond cursor.
+        self.stack.truncate(self.cursor);
+        self.stack.push(snapshot);
+        if self.stack.len() > self.max_depth {
+            self.stack.remove(0);
+        }
+        self.cursor = self.stack.len();
+    }
+
+    /// Undo: move cursor back and return the previous snapshot.
+    pub fn undo(&mut self) -> Option<&AppStateSnapshot> {
+        if self.cursor > 1 {
+            self.cursor -= 1;
+            Some(&self.stack[self.cursor - 1])
+        } else {
+            None
+        }
+    }
+
+    /// Redo: move cursor forward and return the next snapshot.
+    pub fn redo(&mut self) -> Option<&AppStateSnapshot> {
+        if self.cursor < self.stack.len() {
+            self.cursor += 1;
+            Some(&self.stack[self.cursor - 1])
+        } else {
+            None
+        }
+    }
+
+    pub fn can_undo(&self) -> bool {
+        self.cursor > 1
+    }
+
+    pub fn can_redo(&self) -> bool {
+        self.cursor < self.stack.len()
+    }
+}
+
+impl Default for UndoStack {
+    fn default() -> Self {
+        Self::new(50)
+    }
+}
+
 /// The full mutable application state shared between the GUI and renderer.
 pub struct AppState {
     // ── Runtime snapshot (renderer-owned, GUI-read-only) ───────────────────
@@ -412,6 +497,41 @@ impl AppState {
         self.runtime.source_path = source_path;
         self.runtime.lis_buffer = Some(lis_buffer.clone());
         self.runtime.slice_index = slice_index;
+    }
+
+    /// Capture a lightweight snapshot suitable for the undo stack.
+    pub fn snapshot(&self) -> AppStateSnapshot {
+        AppStateSnapshot {
+            lis_config: self.lis_config.clone(),
+            play_state: self.play_state,
+            cluster: ClusterSnapshot {
+                min: self.cluster.min,
+                max: self.cluster.max,
+                ego_mode: self.cluster.ego_mode,
+                ego_direction: self.cluster.ego_direction,
+                secondary_edges: self.cluster.secondary_edges,
+                shared_only: self.cluster.shared_only,
+            },
+            overrides: self.overrides.clone(),
+            as_input_source: self.as_input_source,
+            slice_index: self.runtime.slice_index,
+        }
+    }
+
+    /// Restore state from an undo snapshot.
+    pub fn restore_snapshot(&mut self, snap: &AppStateSnapshot) {
+        self.lis_config = snap.lis_config.clone();
+        self.play_state = snap.play_state;
+        self.cluster.min = snap.cluster.min;
+        self.cluster.max = snap.cluster.max;
+        self.cluster.ego_mode = snap.cluster.ego_mode;
+        self.cluster.ego_direction = snap.cluster.ego_direction;
+        self.cluster.secondary_edges = snap.cluster.secondary_edges;
+        self.cluster.shared_only = snap.cluster.shared_only;
+        self.overrides = snap.overrides.clone();
+        self.as_input_source = snap.as_input_source;
+        self.pending_slice_index = Some(snap.slice_index);
+        self.rebuild_lis = true;
     }
 
     pub fn queue_dataset_load(&mut self, dataset: LvDataset, source_path: PathBuf) {

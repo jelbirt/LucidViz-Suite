@@ -82,6 +82,52 @@ impl FileLoaderPanel {
             ));
             ui.label(format!("Time points: {}", ds.time_points()));
             ui.label(format!("Max objects: {}", ds.max_objects()));
+
+            // ── Dataset preview ───────────────────────────────────────
+            egui::CollapsingHeader::new("Preview")
+                .default_open(false)
+                .show(ui, |ui| {
+                    // First 10 labels
+                    let labels: Vec<&str> =
+                        ds.all_labels.iter().take(10).map(|s| s.as_str()).collect();
+                    ui.label(format!(
+                        "Labels (first {}): {}",
+                        labels.len(),
+                        labels.join(", ")
+                    ));
+
+                    // Edge count
+                    let total_edges: usize = ds.sheets.iter().map(|s| s.edges.len()).sum();
+                    ui.label(format!("Total edges: {total_edges}"));
+
+                    // Cluster value range
+                    let mut cv_min = f64::INFINITY;
+                    let mut cv_max = f64::NEG_INFINITY;
+                    for sheet in &ds.sheets {
+                        for row in &sheet.rows {
+                            cv_min = cv_min.min(row.cluster_value);
+                            cv_max = cv_max.max(row.cluster_value);
+                        }
+                    }
+                    if cv_min.is_finite() && cv_max.is_finite() {
+                        ui.label(format!("Cluster range: [{cv_min:.2}, {cv_max:.2}]"));
+                    }
+
+                    // Shape distribution
+                    let mut shape_counts = std::collections::HashMap::new();
+                    for sheet in &ds.sheets {
+                        for row in &sheet.rows {
+                            *shape_counts
+                                .entry(format!("{:?}", row.shape))
+                                .or_insert(0u32) += 1;
+                        }
+                    }
+                    let mut shapes: Vec<(String, u32)> = shape_counts.into_iter().collect();
+                    shapes.sort_by(|a, b| b.1.cmp(&a.1));
+                    let shape_str: Vec<String> =
+                        shapes.iter().map(|(s, c)| format!("{s}: {c}")).collect();
+                    ui.label(format!("Shapes: {}", shape_str.join(", ")));
+                });
         } else {
             ui.label("No dataset loaded.");
         }

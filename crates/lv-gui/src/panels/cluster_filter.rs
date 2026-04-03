@@ -63,13 +63,16 @@ impl ClusterFilterPanel {
         }
 
         ui.separator();
-        ui.checkbox(&mut state.cluster.ego_mode, "Show ego cluster")
-            .on_hover_text(
-                "Focus the display on a single node and its direct neighbors. \
-                 Select a node in the 3D view to activate.",
-            );
+        ui.checkbox(&mut state.cluster.ego_mode, "Show ego cluster");
+        crate::help_marker(
+            ui,
+            "Focus the display on a single node and its direct neighbors. \
+             Select a node in the 3D view to activate.",
+        );
         ui.horizontal(|ui| {
-            ui.label("Edge direction:").on_hover_text(
+            ui.label("Edge direction:");
+            crate::help_marker(
+                ui,
                 "Which edges to include in the ego cluster. \
                  Incoming = edges pointing to the ego. \
                  Outgoing = edges from the ego. Both = all connected edges.",
@@ -101,13 +104,17 @@ impl ClusterFilterPanel {
         ui.checkbox(
             &mut state.cluster.secondary_edges,
             "Include secondary edges",
-        )
-        .on_hover_text("Show edges between ego neighbors (not just ego-to-neighbor edges).");
-        ui.checkbox(&mut state.cluster.shared_only, "Shared objects only")
-            .on_hover_text(
-                "Only show objects that appear in multiple time slices, \
-                 filtering out transient single-appearance nodes.",
-            );
+        );
+        crate::help_marker(
+            ui,
+            "Show edges between ego neighbors (not just ego-to-neighbor edges).",
+        );
+        ui.checkbox(&mut state.cluster.shared_only, "Shared objects only");
+        crate::help_marker(
+            ui,
+            "Only show objects that appear in multiple time slices, \
+             filtering out transient single-appearance nodes.",
+        );
 
         // Object list (filtered)
         if let Some(ds) = state.dataset() {

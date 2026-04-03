@@ -11,7 +11,18 @@ pub mod workspace;
 
 pub use as_panel::AsPanel;
 pub use mf_panel::MfPanel;
-pub use state::{AppState, AudioState, ClusterState, EgoEdgeDirection, ExportState, SessionState};
+
+/// Tooltip discoverability marker color: muted blue.
+const HELP_COLOR: egui::Color32 = egui::Color32::from_rgb(120, 160, 220);
+
+/// Draw a small "(?) " marker that shows a tooltip on hover.
+pub fn help_marker(ui: &mut egui::Ui, tooltip: &str) {
+    ui.colored_label(HELP_COLOR, "(?)").on_hover_text(tooltip);
+}
+pub use state::{
+    AppState, AppStateSnapshot, AudioState, ClusterState, EgoEdgeDirection, ExportState,
+    SessionState, UndoStack,
+};
 pub use workspace::{ActiveTab, LucidWorkspace, LvPanels};
 
 #[cfg(test)]

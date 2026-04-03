@@ -23,7 +23,9 @@ impl LisControlPanel {
         // ── LIS value ──────────────────────────────────────────────────────
         let prev_lis = state.lis_config.lis_value;
         ui.horizontal(|ui| {
-            ui.label("LIS frames:").on_hover_text(
+            ui.label("LIS frames:");
+            crate::help_marker(
+                ui,
                 "Number of interpolated frames between each pair of time points. \
                  Higher values produce smoother transitions but use more memory.",
             );
@@ -35,7 +37,9 @@ impl LisControlPanel {
 
         // ── Speed ──────────────────────────────────────────────────────────
         ui.horizontal(|ui| {
-            ui.label("Speed:").on_hover_text(
+            ui.label("Speed:");
+            crate::help_marker(
+                ui,
                 "Playback speed multiplier. 1.0 = normal, 2.0 = double speed, \
                  0.5 = half speed. Logarithmic scale.",
             );
@@ -80,7 +84,8 @@ impl LisControlPanel {
 
         // ── Easing ─────────────────────────────────────────────────────────
         let prev_easing = state.lis_config.easing;
-        ui.label("").on_hover_text(
+        crate::help_marker(
+            ui,
             "Easing controls the acceleration curve of interpolation between time slices. \
              Linear = constant speed. Ease In = slow start. Ease Out = slow end. \
              Ease In-Out = slow start and end. Spring = overshoot and settle.",
