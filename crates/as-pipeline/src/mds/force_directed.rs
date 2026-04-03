@@ -4,15 +4,18 @@
 //! attractive forces are asymmetric: edge `i→j` pulls `j` toward `i`
 //! more strongly than `i` toward `j`, creating spatial "flow" patterns.
 
+use std::sync::mpsc;
+
 use anyhow::{bail, Result};
 use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 
 use crate::error::AsError;
 use crate::types::{DistanceMatrix, MdsAlgorithm, MdsCoordinates};
 
 /// Configuration for force-directed layout.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ForceDirectedConfig {
     /// Number of iterations.
     pub max_iter: u32,
@@ -49,6 +52,17 @@ pub fn force_directed_layout(
     config: &ForceDirectedConfig,
     directed: bool,
 ) -> Result<MdsCoordinates> {
+    force_directed_layout_with_progress(dist, dims, config, directed, None)
+}
+
+/// Run force-directed layout with an optional progress callback.
+pub fn force_directed_layout_with_progress(
+    dist: &DistanceMatrix,
+    dims: usize,
+    config: &ForceDirectedConfig,
+    directed: bool,
+    progress: Option<mpsc::Sender<f32>>,
+) -> Result<MdsCoordinates> {
     let n = dist.n;
     if n < 2 {
         bail!(AsError::TooFewNodes(n));
@@ -67,7 +81,11 @@ pub fn force_directed_layout(
 
     let mut temp = config.initial_temp;
 
+    let total_iters = config.max_iter as f32;
     for _iter in 0..config.max_iter {
+        if let Some(ref tx) = progress {
+            let _ = tx.send(_iter as f32 / total_iters);
+        }
         // Compute displacements.
         let displacements: Vec<Vec<f64>> = (0..n)
             .into_par_iter()

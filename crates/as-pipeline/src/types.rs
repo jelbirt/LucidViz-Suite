@@ -1,6 +1,9 @@
 //! Core types for the AlignSpace pipeline.
 
 use crate::error::AsError;
+use crate::mds::force_directed::ForceDirectedConfig;
+use crate::mds::tsne::TsneConfig;
+use crate::mds::umap::UmapConfig;
 pub use lv_data::analysis::CentralityReport;
 use lv_data::schema::LvDataset;
 use ndarray::Array2;
@@ -186,6 +189,12 @@ pub enum MdsConfig {
     },
     Landmark {
         n_landmarks: usize,
+    },
+    Tsne(TsneConfig),
+    Umap(UmapConfig),
+    ForceDirected {
+        config: ForceDirectedConfig,
+        directed: bool,
     },
 }
 

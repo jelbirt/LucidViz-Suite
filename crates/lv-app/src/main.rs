@@ -30,7 +30,7 @@ use session::{
 };
 
 #[cfg(feature = "audio")]
-use lv_audio::{BeatsScheduler, GraduatedConfig};
+use lv_audio::{BeatMapping, BeatsScheduler, GraduatedConfig};
 #[cfg(feature = "export")]
 use lv_export::{
     capture_frame, capture_sequence_with_control, ImageFormat, SequenceConfig, SequenceControl,
@@ -345,6 +345,10 @@ struct Renderer {
     edge_uniform_buf: wgpu::Buffer,
     window_size: (u32, u32),
     last_click_pos: Option<(f64, f64)>,
+    // Modifier key tracking for keyboard shortcuts
+    modifiers: winit::keyboard::ModifiersState,
+    // Undo/redo
+    undo_stack: lv_gui::UndoStack,
     // Phase 9: preferences + notifications
     prefs: UserPreferences,
     notifications: NotificationQueue,
@@ -606,6 +610,8 @@ impl Renderer {
             edge_uniform_buf,
             window_size: (size.width, size.height),
             last_click_pos: None,
+            modifiers: winit::keyboard::ModifiersState::empty(),
+            undo_stack: lv_gui::UndoStack::default(),
             prefs,
             notifications: NotificationQueue::default(),
             #[cfg(feature = "audio")]
@@ -698,11 +704,26 @@ impl Renderer {
                 semitone_range: self.app_state.audio.semitone_range,
                 ..GraduatedConfig::default()
             };
+            let mapping = match self.app_state.audio.mapping {
+                lv_gui::state::SonificationMapping::CentralityToPitch => {
+                    BeatMapping::CentralityToPitch
+                }
+                lv_gui::state::SonificationMapping::DegreeToVelocity => {
+                    BeatMapping::DegreeToVelocity
+                }
+                lv_gui::state::SonificationMapping::BetweennessPitchClosenessVelocity => {
+                    BeatMapping::BetweennessPitchClosenessVelocity
+                }
+                lv_gui::state::SonificationMapping::ClusterToChannel => {
+                    BeatMapping::ClusterToChannel
+                }
+            };
             self.audio_scheduler.on_frame_advance(
                 frame,
                 &self.dataset.sheets[idx].rows,
                 self.app_state.audio.graduated,
                 &grad_cfg,
+                mapping,
             );
             self.last_audio_frame_index = Some(frame.slice_index);
         }
@@ -832,6 +853,10 @@ impl Renderer {
                 }
             };
             self.app_state.session.loading = false;
+            if result.is_err() {
+                self.app_state.session.confirm_delete = None;
+                self.app_state.session.renaming = None;
+            }
             self.app_state.session.status = Some(match result {
                 Ok(msg) => msg,
                 Err(err) => format!("Session error: {err:#}"),
@@ -1117,6 +1142,11 @@ impl Renderer {
         self.app_state.poll_export_job();
         self.handle_audio_request();
         self.handle_session_request();
+
+        // Push undo snapshot before processing state-changing events.
+        if self.app_state.pending_dataset_load.is_some() || self.app_state.rebuild_lis {
+            self.undo_stack.push(self.app_state.snapshot());
+        }
 
         if let Some(pending) = self.app_state.pending_dataset_load.take() {
             self.dataset = pending.dataset;
@@ -1431,25 +1461,85 @@ impl Renderer {
     }
 
     fn on_key(&mut self, code: KeyCode, pressed: bool) {
+        if !pressed {
+            return;
+        }
+
+        let ctrl = self.modifiers.control_key();
+        let shift = self.modifiers.shift_key();
+
+        // ── Application shortcuts ─────────────────────────────────────
+        match (ctrl, shift, code) {
+            (false, false, KeyCode::Space) => {
+                // Play/pause toggle
+                self.app_state.play_state = match self.app_state.play_state {
+                    PlayState::Playing => PlayState::Paused,
+                    PlayState::Paused | PlayState::Stopped => PlayState::Playing,
+                };
+                return;
+            }
+            (true, false, KeyCode::KeyS) => {
+                // Save session
+                let name = self.app_state.session.name.trim().to_string();
+                if !name.is_empty() {
+                    self.app_state.session.pending_request =
+                        Some(lv_gui::state::SessionRequest::Save(name));
+                }
+                return;
+            }
+            (false, false, KeyCode::KeyN) => {
+                // Next slice
+                let max = self.dataset.sheets.len().saturating_sub(1) as u32;
+                if self.slice_index < max {
+                    self.app_state.pending_slice_index = Some(self.slice_index + 1);
+                }
+                return;
+            }
+            (false, false, KeyCode::KeyP) => {
+                // Previous slice
+                if self.slice_index > 0 {
+                    self.app_state.pending_slice_index = Some(self.slice_index.saturating_sub(1));
+                }
+                return;
+            }
+            (true, false, KeyCode::KeyZ) => {
+                // Undo
+                if let Some(snap) = self.undo_stack.undo() {
+                    let snap = snap.clone();
+                    self.app_state.restore_snapshot(&snap);
+                }
+                return;
+            }
+            (true, true, KeyCode::KeyZ) => {
+                // Redo
+                if let Some(snap) = self.undo_stack.redo() {
+                    let snap = snap.clone();
+                    self.app_state.restore_snapshot(&snap);
+                }
+                return;
+            }
+            _ => {}
+        }
+
+        // ── Camera keys ───────────────────────────────────────────────
         let ck = match code {
             KeyCode::ArrowLeft => CameraKey::Left,
             KeyCode::ArrowRight => CameraKey::Right,
             KeyCode::ArrowUp => CameraKey::Up,
             KeyCode::ArrowDown => CameraKey::Down,
             KeyCode::KeyF => CameraKey::ZoomIn,
-            KeyCode::KeyS => CameraKey::ZoomOut,
             KeyCode::Backspace => CameraKey::Reset,
             KeyCode::KeyC => CameraKey::Centre,
+            // KeyS is now save-session shortcut (Ctrl+S) or still zoom-out if
+            // ctrl is not pressed (but N/P took priority); keep zoom-out for
+            // the plain S case only when not caught above.
+            KeyCode::KeyS if !ctrl => CameraKey::ZoomOut,
             _ => return,
         };
-        if pressed {
-            let (_, action) = self.camera.key_pressed(ck);
-            if matches!(action, Some(AppAction::Exit)) {
-                // propagated via CloseRequested event
-            }
+        let (_, action) = self.camera.key_pressed(ck);
+        if matches!(action, Some(AppAction::Exit)) {
+            // propagated via CloseRequested event
         }
-        // Key release is a no-op: the camera applies immediate deltas per
-        // key_pressed call and has no held-key state to clear.
     }
 }
 
@@ -1677,6 +1767,9 @@ impl ApplicationHandler for App {
             }
             WindowEvent::Resized(sz) => renderer.resize(sz.width, sz.height),
             WindowEvent::RedrawRequested => renderer.render(window),
+            WindowEvent::ModifiersChanged(mods) => {
+                renderer.modifiers = mods.state();
+            }
             WindowEvent::KeyboardInput {
                 event:
                     KeyEvent {
@@ -1734,6 +1827,13 @@ impl ApplicationHandler for App {
 
 fn main() {
     env_logger::init();
+
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--headless") {
+        run_headless(&args);
+        return;
+    }
+
     let event_loop = match EventLoop::new() {
         Ok(event_loop) => event_loop,
         Err(err) => {
@@ -1750,4 +1850,135 @@ fn main() {
     if let Err(err) = event_loop.run_app(&mut app) {
         log::error!("Application event loop failed: {err:#}");
     }
+}
+
+/// Headless mode: load dataset, run MF -> AS pipeline, write JSON coordinates.
+///
+/// Usage: lv-app --headless --input <path> --output <path>
+fn run_headless(args: &[String]) {
+    let input_path = args
+        .windows(2)
+        .find(|w| w[0] == "--input")
+        .map(|w| std::path::PathBuf::from(&w[1]));
+    let output_path = args
+        .windows(2)
+        .find(|w| w[0] == "--output")
+        .map(|w| std::path::PathBuf::from(&w[1]));
+
+    let Some(input_path) = input_path else {
+        eprintln!("--headless requires --input <path>");
+        std::process::exit(1);
+    };
+    let Some(output_path) = output_path else {
+        eprintln!("--headless requires --output <path>");
+        std::process::exit(1);
+    };
+
+    eprintln!("Headless mode: loading {}", input_path.display());
+    let dataset = match load_dataset_from_path(&input_path) {
+        Ok(ds) => ds,
+        Err(err) => {
+            eprintln!("Failed to load dataset: {err:#}");
+            std::process::exit(1);
+        }
+    };
+
+    use as_pipeline::pipeline::run_pipeline;
+    use as_pipeline::types::{
+        AsPipelineInput, CentralityMode, MdsConfig, MdsDimMode, NormalizationMode, ProcrustesMode,
+    };
+    use std::collections::BTreeSet;
+
+    let all_labels: Vec<String> = {
+        let mut set = BTreeSet::new();
+        for sheet in &dataset.sheets {
+            for row in &sheet.rows {
+                set.insert(row.label.clone());
+            }
+        }
+        set.into_iter().collect()
+    };
+
+    let datasets: Vec<(String, ndarray::Array2<f64>)> = dataset
+        .sheets
+        .iter()
+        .map(|sheet| {
+            let n = all_labels.len();
+            let mut adj = ndarray::Array2::<f64>::zeros((n, n));
+            let label_idx: std::collections::HashMap<&str, usize> = all_labels
+                .iter()
+                .enumerate()
+                .map(|(i, l)| (l.as_str(), i))
+                .collect();
+            for edge in &sheet.edges {
+                if let (Some(&i), Some(&j)) = (
+                    label_idx.get(edge.from.as_str()),
+                    label_idx.get(edge.to.as_str()),
+                ) {
+                    adj[(i, j)] = edge.strength;
+                }
+            }
+            (sheet.name.clone(), adj)
+        })
+        .collect();
+
+    let input = AsPipelineInput {
+        datasets,
+        labels: all_labels,
+        mds_config: MdsConfig::Auto,
+        procrustes_mode: ProcrustesMode::None,
+        mds_dims: MdsDimMode::Fixed(3),
+        normalize: true,
+        normalization_mode: NormalizationMode::Independent,
+        target_range: 500.0,
+        procrustes_scale: false,
+        centrality_mode: CentralityMode::Directed,
+    };
+
+    eprintln!("Running AS pipeline...");
+    let result = match run_pipeline(&input) {
+        Ok(r) => r,
+        Err(err) => {
+            eprintln!("Pipeline failed: {err:#}");
+            std::process::exit(1);
+        }
+    };
+
+    let output: Vec<serde_json::Value> = result
+        .coordinates
+        .iter()
+        .enumerate()
+        .map(|(step, coords)| {
+            let points: Vec<serde_json::Value> = coords
+                .labels
+                .iter()
+                .enumerate()
+                .map(|(i, label)| {
+                    let row = coords.row(i);
+                    serde_json::json!({
+                        "label": label,
+                        "x": row.first().copied().unwrap_or(0.0),
+                        "y": row.get(1).copied().unwrap_or(0.0),
+                        "z": row.get(2).copied().unwrap_or(0.0),
+                    })
+                })
+                .collect();
+            serde_json::json!({
+                "step": step,
+                "stress": coords.stress,
+                "coordinates": points,
+            })
+        })
+        .collect();
+
+    let json = serde_json::to_string_pretty(&output).expect("JSON serialization failed");
+    if let Err(err) = std::fs::write(&output_path, &json) {
+        eprintln!("Failed to write output: {err}");
+        std::process::exit(1);
+    }
+    eprintln!(
+        "Wrote {} steps to {}",
+        result.coordinates.len(),
+        output_path.display()
+    );
 }

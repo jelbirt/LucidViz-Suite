@@ -6,6 +6,9 @@ use std::sync::mpsc;
 use std::thread;
 
 use crate::bridge::{mf_series_output_to_as_input, MfSeriesAsInputOptions};
+use as_pipeline::mds::force_directed::ForceDirectedConfig;
+use as_pipeline::mds::tsne::TsneConfig;
+use as_pipeline::mds::umap::UmapConfig;
 use as_pipeline::output::write_as_results;
 use as_pipeline::pipeline::{mf_output_to_distance_matrix, run_distance_pipeline, run_pipeline};
 use as_pipeline::types::{
@@ -37,6 +40,18 @@ pub struct AsPanel {
     smacof_tol: f64,
     smacof_random: bool,
     smacof_seed: u64,
+    // Landmark sub-config
+    landmark_n: usize,
+    // t-SNE sub-config
+    tsne_perplexity: f64,
+    tsne_max_iter: u32,
+    // UMAP sub-config
+    umap_n_neighbors: usize,
+    umap_min_dist: f64,
+    umap_n_epochs: u32,
+    // Force-directed sub-config
+    fd_iterations: u32,
+    fd_asymmetry: f64,
     // Output dir
     output_dir: Option<PathBuf>,
     status: String,
@@ -49,6 +64,10 @@ enum MdsAlgorithmUi {
     Smacof,
     Pivot,
     Multilevel,
+    Landmark,
+    Tsne,
+    Umap,
+    ForceDirected,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -74,6 +93,14 @@ impl Default for AsPanel {
             smacof_tol: 1e-6,
             smacof_random: false,
             smacof_seed: 42,
+            landmark_n: 50,
+            tsne_perplexity: 30.0,
+            tsne_max_iter: 1000,
+            umap_n_neighbors: 15,
+            umap_min_dist: 0.1,
+            umap_n_epochs: 200,
+            fd_iterations: 500,
+            fd_asymmetry: 0.5,
             output_dir: None,
             status: "Ready.".into(),
         }
@@ -86,7 +113,8 @@ impl AsPanel {
         ui.separator();
 
         // ── Algorithm ──────────────────────────────────────────────────────
-        ui.label("").on_hover_text(
+        crate::help_marker(
+            ui,
             "MDS algorithm for embedding the distance matrix into 3D space. \
              Auto selects Classical for small networks (<800 nodes), Pivot for larger ones. \
              SMACOF iteratively minimizes stress. Multilevel uses hierarchical coarsening.",
@@ -102,6 +130,14 @@ impl AsPanel {
                     &mut self.algorithm,
                     MdsAlgorithmUi::Multilevel,
                     "Multilevel",
+                );
+                ui.selectable_value(&mut self.algorithm, MdsAlgorithmUi::Landmark, "Landmark");
+                ui.selectable_value(&mut self.algorithm, MdsAlgorithmUi::Tsne, "t-SNE");
+                ui.selectable_value(&mut self.algorithm, MdsAlgorithmUi::Umap, "UMAP");
+                ui.selectable_value(
+                    &mut self.algorithm,
+                    MdsAlgorithmUi::ForceDirected,
+                    "Force-Directed",
                 );
             });
 
@@ -123,14 +159,18 @@ impl AsPanel {
         if self.algorithm == MdsAlgorithmUi::Smacof {
             ui.indent("smacof", |ui| {
                 ui.horizontal(|ui| {
-                    ui.label("Max iter:").on_hover_text(
+                    ui.label("Max iter:");
+                    crate::help_marker(
+                        ui,
                         "Maximum SMACOF iterations. More iterations improve stress \
                          but take longer. Typical: 300-1000.",
                     );
                     ui.add(egui::DragValue::new(&mut self.smacof_max_iter).range(10..=5000));
                 });
                 ui.horizontal(|ui| {
-                    ui.label("Tolerance:").on_hover_text(
+                    ui.label("Tolerance:");
+                    crate::help_marker(
+                        ui,
                         "Convergence threshold for SMACOF. Iteration stops when \
                          stress improvement drops below this value. Typical: 1e-6.",
                     );
@@ -147,6 +187,82 @@ impl AsPanel {
                         ui.label("Seed:");
                         ui.add(egui::DragValue::new(&mut self.smacof_seed));
                     }
+                });
+            });
+        }
+
+        // Landmark sub-config
+        if self.algorithm == MdsAlgorithmUi::Landmark {
+            ui.indent("landmark", |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Landmarks:");
+                    ui.add(egui::Slider::new(&mut self.landmark_n, 10..=500).text("n"));
+                });
+            });
+        }
+
+        // t-SNE sub-config
+        if self.algorithm == MdsAlgorithmUi::Tsne {
+            ui.indent("tsne", |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Perplexity:");
+                    crate::help_marker(
+                        ui,
+                        "Effective number of neighbors. Controls the balance \
+                         between local and global structure. Typical: 5-50.",
+                    );
+                    ui.add(egui::Slider::new(&mut self.tsne_perplexity, 5.0..=100.0));
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Max iterations:");
+                    ui.add(egui::Slider::new(&mut self.tsne_max_iter, 100..=2000));
+                });
+            });
+        }
+
+        // UMAP sub-config
+        if self.algorithm == MdsAlgorithmUi::Umap {
+            ui.indent("umap", |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Neighbors:");
+                    crate::help_marker(
+                        ui,
+                        "Number of nearest neighbors for the k-NN graph. \
+                         Larger values capture more global structure.",
+                    );
+                    ui.add(egui::Slider::new(&mut self.umap_n_neighbors, 5..=100));
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Min distance:");
+                    crate::help_marker(
+                        ui,
+                        "Minimum distance in the embedding. Smaller values \
+                         produce tighter clusters.",
+                    );
+                    ui.add(egui::Slider::new(&mut self.umap_min_dist, 0.0..=1.0));
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Epochs:");
+                    ui.add(egui::Slider::new(&mut self.umap_n_epochs, 50..=500));
+                });
+            });
+        }
+
+        // Force-directed sub-config
+        if self.algorithm == MdsAlgorithmUi::ForceDirected {
+            ui.indent("force_directed", |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Iterations:");
+                    ui.add(egui::Slider::new(&mut self.fd_iterations, 50..=2000));
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Asymmetry:");
+                    crate::help_marker(
+                        ui,
+                        "Asymmetry factor for directed edges: 0.0 = symmetric, \
+                         1.0 = fully asymmetric.",
+                    );
+                    ui.add(egui::Slider::new(&mut self.fd_asymmetry, 0.0..=1.0));
                 });
             });
         }
@@ -347,6 +463,28 @@ impl AsPanel {
             MdsAlgorithmUi::Multilevel => MdsConfig::Multilevel {
                 levels: self.ml_levels,
                 refine_iters: self.ml_refine_iters,
+            },
+            MdsAlgorithmUi::Landmark => MdsConfig::Landmark {
+                n_landmarks: self.landmark_n,
+            },
+            MdsAlgorithmUi::Tsne => MdsConfig::Tsne(TsneConfig {
+                perplexity: self.tsne_perplexity,
+                max_iter: self.tsne_max_iter,
+                ..TsneConfig::default()
+            }),
+            MdsAlgorithmUi::Umap => MdsConfig::Umap(UmapConfig {
+                n_neighbors: self.umap_n_neighbors,
+                min_dist: self.umap_min_dist,
+                n_epochs: self.umap_n_epochs,
+                ..UmapConfig::default()
+            }),
+            MdsAlgorithmUi::ForceDirected => MdsConfig::ForceDirected {
+                config: ForceDirectedConfig {
+                    max_iter: self.fd_iterations,
+                    directed_asymmetry: self.fd_asymmetry,
+                    ..ForceDirectedConfig::default()
+                },
+                directed: matches!(self.centrality_mode, CentralityMode::Directed),
             },
         }
     }

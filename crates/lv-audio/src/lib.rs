@@ -10,5 +10,5 @@ pub mod soundbank;
 
 pub use graduated::{graduated_note, GraduatedConfig};
 pub use midi_engine::{MidiEngine, MidiError};
-pub use scheduler::BeatsScheduler;
+pub use scheduler::{BeatMapping, BeatsScheduler};
 pub use soundbank::gm_instrument_name;

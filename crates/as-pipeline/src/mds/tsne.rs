@@ -7,15 +7,18 @@
 //!
 //! Reference: van der Maaten & Hinton (2008).
 
+use std::sync::mpsc;
+
 use anyhow::{bail, Result};
 use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 
 use crate::error::AsError;
 use crate::types::{DistanceMatrix, MdsAlgorithm, MdsCoordinates};
 
 /// Configuration for t-SNE.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TsneConfig {
     /// Perplexity (effective number of neighbors). Typical: 5-50.
     pub perplexity: f64,
@@ -53,6 +56,17 @@ impl Default for TsneConfig {
 /// Run t-SNE on a distance matrix.
 #[allow(clippy::needless_range_loop)]
 pub fn tsne(dist: &DistanceMatrix, dims: usize, config: &TsneConfig) -> Result<MdsCoordinates> {
+    tsne_with_progress(dist, dims, config, None)
+}
+
+/// Run t-SNE with an optional progress callback.
+#[allow(clippy::needless_range_loop)]
+pub fn tsne_with_progress(
+    dist: &DistanceMatrix,
+    dims: usize,
+    config: &TsneConfig,
+    progress: Option<mpsc::Sender<f32>>,
+) -> Result<MdsCoordinates> {
     let n = dist.n;
     if n < 2 {
         bail!(AsError::TooFewNodes(n));
@@ -71,7 +85,11 @@ pub fn tsne(dist: &DistanceMatrix, dims: usize, config: &TsneConfig) -> Result<M
     let mut y_prev = y.clone();
 
     // Step 3: Gradient descent.
+    let total = config.max_iter as f32;
     for iter in 0..config.max_iter {
+        if let Some(ref tx) = progress {
+            let _ = tx.send(iter as f32 / total);
+        }
         let momentum = if iter < config.momentum_switch_iter {
             config.initial_momentum
         } else {

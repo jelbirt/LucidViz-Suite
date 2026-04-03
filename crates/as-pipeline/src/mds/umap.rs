@@ -5,14 +5,17 @@
 //! 2. Compute fuzzy simplicial set (smooth nearest-neighbor distances)
 //! 3. Optimize low-dimensional embedding via SGD with attractive/repulsive forces
 
+use std::sync::mpsc;
+
 use anyhow::{bail, Result};
 use rand::{Rng, SeedableRng};
+use serde::{Deserialize, Serialize};
 
 use crate::error::AsError;
 use crate::types::{DistanceMatrix, MdsAlgorithm, MdsCoordinates};
 
 /// Configuration for UMAP.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UmapConfig {
     /// Number of nearest neighbors for the k-NN graph.
     pub n_neighbors: usize,
@@ -43,6 +46,16 @@ impl Default for UmapConfig {
 
 /// Run UMAP on a distance matrix.
 pub fn umap(dist: &DistanceMatrix, dims: usize, config: &UmapConfig) -> Result<MdsCoordinates> {
+    umap_with_progress(dist, dims, config, None)
+}
+
+/// Run UMAP with an optional progress callback.
+pub fn umap_with_progress(
+    dist: &DistanceMatrix,
+    dims: usize,
+    config: &UmapConfig,
+    progress: Option<mpsc::Sender<f32>>,
+) -> Result<MdsCoordinates> {
     let n = dist.n;
     if n < 2 {
         bail!(AsError::TooFewNodes(n));
@@ -89,7 +102,11 @@ pub fn umap(dist: &DistanceMatrix, dims: usize, config: &UmapConfig) -> Result<M
         )?);
     }
 
+    let total_epochs = config.n_epochs as f32;
     for epoch in 0..config.n_epochs {
+        if let Some(ref tx) = progress {
+            let _ = tx.send(epoch as f32 / total_epochs);
+        }
         let alpha = config.learning_rate * (1.0 - epoch as f64 / config.n_epochs as f64);
 
         for &(i, j, weight) in &edges {

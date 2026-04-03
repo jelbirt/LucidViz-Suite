@@ -46,6 +46,11 @@ pub fn run_mds(
             refine_iters,
         } => multilevel::multilevel_mds(dist, dims, *levels, *refine_iters),
         MdsConfig::Landmark { n_landmarks } => landmark::landmark_mds(dist, dims, *n_landmarks),
+        MdsConfig::Tsne(tsne_cfg) => tsne::tsne(dist, dims, tsne_cfg),
+        MdsConfig::Umap(umap_cfg) => umap::umap(dist, dims, umap_cfg),
+        MdsConfig::ForceDirected { config, directed } => {
+            force_directed::force_directed_layout(dist, dims, config, *directed)
+        }
     }
 }
 
