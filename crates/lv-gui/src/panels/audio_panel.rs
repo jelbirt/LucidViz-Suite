@@ -73,19 +73,32 @@ mod inner {
             });
 
             ui.horizontal(|ui| {
-                ui.label("Beats per transition:");
+                ui.label("Beats per transition:").on_hover_text(
+                    "Number of MIDI note-on events fired during each time-slice transition. \
+                     Higher values produce denser rhythmic patterns.",
+                );
                 ui.add(egui::Slider::new(&mut state.audio.beats, 1..=32));
             });
             ui.horizontal(|ui| {
-                ui.label("Hold slices:");
+                ui.label("Hold slices:").on_hover_text(
+                    "Number of LIS frames each note is held before note-off. \
+                     Higher values produce legato, lower values produce staccato.",
+                );
                 ui.add(egui::Slider::new(&mut state.audio.hold_slices, 1..=64));
             });
 
-            ui.checkbox(&mut state.audio.graduated, "Graduated Beats");
+            ui.checkbox(&mut state.audio.graduated, "Graduated Beats")
+                .on_hover_text(
+                    "When enabled, note pitch varies with node centrality. \
+                     More central nodes produce higher pitches.",
+                );
 
             if state.audio.graduated {
                 ui.horizontal(|ui| {
-                    ui.label("Semitone range:");
+                    ui.label("Semitone range:").on_hover_text(
+                        "Maximum pitch offset in semitones above the base note. \
+                         12 = one octave, 24 = two octaves.",
+                    );
                     ui.add(egui::Slider::new(&mut state.audio.semitone_range, 1..=24));
                 });
 

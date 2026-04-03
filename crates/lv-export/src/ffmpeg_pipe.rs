@@ -208,3 +208,159 @@ pub fn export_video_with_control(
 
     Ok(())
 }
+
+/// Check whether ffmpeg is available on PATH.
+pub fn ffmpeg_available() -> bool {
+    Command::new("ffmpeg")
+        .arg("-version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok()
+}
+
+/// Validate a `VideoConfig` without spawning ffmpeg or requiring GPU context.
+pub fn validate_video_config(config: &VideoConfig) -> Result<()> {
+    const ALLOWED_CODECS: &[&str] = &[
+        "libx264",
+        "libx265",
+        "libvpx-vp9",
+        "prores_ks",
+        "libaom-av1",
+        "h264_nvenc",
+        "hevc_nvenc",
+    ];
+    if !ALLOWED_CODECS.contains(&config.codec.as_str()) {
+        bail!(
+            "unsupported codec '{}'; allowed: {}",
+            config.codec,
+            ALLOWED_CODECS.join(", ")
+        );
+    }
+    if config.crf > 63 {
+        bail!("crf must be in [0, 63], got {}", config.crf);
+    }
+    if config.fps == 0 {
+        bail!("fps must be > 0");
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_config_accepts_valid() {
+        let config = VideoConfig::default();
+        validate_video_config(&config).expect("default config should be valid");
+    }
+
+    #[test]
+    fn validate_config_rejects_bad_codec() {
+        let config = VideoConfig {
+            codec: "malicious; rm -rf /".into(),
+            ..Default::default()
+        };
+        let err = validate_video_config(&config).expect_err("bad codec should fail");
+        assert!(err.to_string().contains("unsupported codec"));
+    }
+
+    #[test]
+    fn validate_config_rejects_high_crf() {
+        let config = VideoConfig {
+            crf: 100,
+            ..Default::default()
+        };
+        let err = validate_video_config(&config).expect_err("crf > 63 should fail");
+        assert!(err.to_string().contains("crf"));
+    }
+
+    #[test]
+    fn validate_config_rejects_zero_fps() {
+        let config = VideoConfig {
+            fps: 0,
+            ..Default::default()
+        };
+        let err = validate_video_config(&config).expect_err("fps=0 should fail");
+        assert!(err.to_string().contains("fps"));
+    }
+
+    #[test]
+    fn validate_config_all_allowed_codecs() {
+        for codec in [
+            "libx264",
+            "libx265",
+            "libvpx-vp9",
+            "prores_ks",
+            "libaom-av1",
+            "h264_nvenc",
+            "hevc_nvenc",
+        ] {
+            let config = VideoConfig {
+                codec: codec.to_string(),
+                ..Default::default()
+            };
+            validate_video_config(&config)
+                .unwrap_or_else(|_| panic!("codec '{codec}' should be valid"));
+        }
+    }
+
+    #[test]
+    fn ffmpeg_raw_pipe_protocol() {
+        // Skip if ffmpeg is not installed.
+        if !ffmpeg_available() {
+            eprintln!("SKIPPING ffmpeg_raw_pipe_protocol: ffmpeg not found on PATH");
+            return;
+        }
+
+        // Pipe 5 frames of 4x4 RGBA data to ffmpeg's null muxer.
+        let width = 4u32;
+        let height = 4u32;
+        let fps = 30;
+        let frame_bytes = (width * height * 4) as usize;
+        let n_frames = 5;
+
+        let mut ffmpeg = Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-f",
+                "rawvideo",
+                "-pixel_format",
+                "rgba",
+                "-video_size",
+                &format!("{width}x{height}"),
+                "-framerate",
+                &fps.to_string(),
+                "-i",
+                "pipe:0",
+                "-f",
+                "null",
+                "-",
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn ffmpeg");
+
+        let stdin = ffmpeg.stdin.as_mut().expect("ffmpeg stdin");
+
+        // Write synthetic frames (solid colors).
+        for i in 0..n_frames {
+            let pixel = [(i * 50) as u8, 100, 200, 255];
+            let frame: Vec<u8> = pixel.iter().copied().cycle().take(frame_bytes).collect();
+            stdin.write_all(&frame).expect("write frame to ffmpeg");
+        }
+
+        drop(ffmpeg.stdin.take());
+        let status = ffmpeg.wait().expect("ffmpeg wait");
+        assert!(
+            status.success(),
+            "ffmpeg should exit successfully with null muxer"
+        );
+    }
+}

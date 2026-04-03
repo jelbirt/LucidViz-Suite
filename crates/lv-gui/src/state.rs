@@ -457,6 +457,7 @@ impl Default for AppState {
 mod tests {
     use super::AppState;
     use lv_data::{LisBuffer, LisConfig, LvDataset};
+    use std::collections::HashMap;
     use std::path::PathBuf;
 
     fn sample_dataset() -> LvDataset {
@@ -564,5 +565,167 @@ mod tests {
         assert!(session.name.is_empty());
         assert!(session.saved_sessions.is_empty());
         assert!(session.status.is_none());
+    }
+
+    #[test]
+    fn cluster_range_clamp_prevents_inversion() {
+        use super::ClusterState;
+        let mut cluster = ClusterState::default();
+        cluster.cached_data_range = Some((0.0, 10.0));
+        cluster.min = 15.0; // above max of data range
+        cluster.max = -5.0; // below min of data range
+
+        // Simulate the clamping logic from cluster_filter panel
+        let (data_min, data_max) = cluster.cached_data_range.unwrap();
+        cluster.min = cluster.min.clamp(data_min, data_max);
+        cluster.max = cluster.max.clamp(data_min, data_max);
+        if cluster.min > cluster.max {
+            cluster.min = data_min;
+            cluster.max = data_max;
+        }
+        assert!(cluster.min <= cluster.max);
+        assert!(cluster.min >= data_min);
+        assert!(cluster.max <= data_max);
+    }
+
+    #[test]
+    fn override_map_operations() {
+        use super::ObjectOverride;
+        let mut overrides: HashMap<String, ObjectOverride> = HashMap::new();
+
+        // Insert override
+        overrides.insert(
+            "node_a".into(),
+            ObjectOverride {
+                shape: Some(lv_data::ShapeKind::Cube),
+                color: Some([1.0, 0.0, 0.0]),
+                size: Some(5.0),
+            },
+        );
+        assert!(overrides.contains_key("node_a"));
+        assert_eq!(overrides["node_a"].shape, Some(lv_data::ShapeKind::Cube));
+
+        // Clear override
+        overrides.remove("node_a");
+        assert!(!overrides.contains_key("node_a"));
+
+        // Reset all
+        overrides.insert(
+            "x".into(),
+            ObjectOverride {
+                shape: None,
+                color: None,
+                size: None,
+            },
+        );
+        overrides.insert(
+            "y".into(),
+            ObjectOverride {
+                shape: None,
+                color: None,
+                size: None,
+            },
+        );
+        overrides.clear();
+        assert!(overrides.is_empty());
+    }
+
+    #[test]
+    fn sonification_mapping_display_and_variants() {
+        use super::SonificationMapping;
+        assert_eq!(SonificationMapping::ALL.len(), 4);
+        for &mapping in SonificationMapping::ALL {
+            let display = mapping.to_string();
+            assert!(!display.is_empty(), "display should not be empty");
+        }
+        assert_eq!(
+            SonificationMapping::default(),
+            SonificationMapping::CentralityToPitch
+        );
+    }
+
+    #[test]
+    fn session_request_variants() {
+        use super::SessionRequest;
+        let save = SessionRequest::Save("test".into());
+        let load = SessionRequest::Load("test".into());
+        let delete = SessionRequest::Delete("test".into());
+        let rename = SessionRequest::Rename {
+            from: "old".into(),
+            to: "new".into(),
+        };
+        // Just verify they construct without panic.
+        let _ = format!("{save:?}");
+        let _ = format!("{load:?}");
+        let _ = format!("{delete:?}");
+        let _ = format!("{rename:?}");
+    }
+
+    #[test]
+    fn easing_mode_in_lis_config() {
+        let mut cfg = LisConfig::default();
+        assert_eq!(cfg.easing, lv_data::EasingMode::Linear);
+        cfg.easing = lv_data::EasingMode::Spring;
+        assert_eq!(cfg.easing, lv_data::EasingMode::Spring);
+        // Verify serialization round-trip
+        let json = serde_json::to_string(&cfg).unwrap();
+        let cfg2: LisConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(cfg2.easing, lv_data::EasingMode::Spring);
+    }
+
+    #[test]
+    fn cluster_filter_counts_visible_objects() {
+        use lv_data::{LvDataset, LvRow, LvSheet};
+        let ds = LvDataset {
+            source_path: None,
+            sheets: vec![LvSheet {
+                name: "T0".into(),
+                sheet_index: 0,
+                rows: vec![
+                    LvRow {
+                        label: "a".into(),
+                        cluster_value: 0.3,
+                        ..Default::default()
+                    },
+                    LvRow {
+                        label: "b".into(),
+                        cluster_value: 0.7,
+                        ..Default::default()
+                    },
+                    LvRow {
+                        label: "c".into(),
+                        cluster_value: 1.5,
+                        ..Default::default()
+                    },
+                ],
+                edges: vec![],
+            }],
+            all_labels: vec!["a".into(), "b".into(), "c".into()],
+        };
+        // Filter: min=0.0, max=1.0 should include a (0.3) and b (0.7) but not c (1.5)
+        let min = 0.0;
+        let max = 1.0;
+        let visible: Vec<&str> = ds
+            .sheets
+            .iter()
+            .flat_map(|s| s.rows.iter())
+            .filter(|r| r.cluster_value >= min && r.cluster_value <= max)
+            .map(|r| r.label.as_str())
+            .collect();
+        assert_eq!(visible.len(), 2);
+        assert!(visible.contains(&"a"));
+        assert!(visible.contains(&"b"));
+        assert!(!visible.contains(&"c"));
+    }
+
+    #[test]
+    fn play_state_transitions() {
+        use super::PlayState;
+        let mut state = AppState::new();
+        assert_eq!(state.play_state, PlayState::Playing);
+        state.play_state = PlayState::Paused;
+        assert_eq!(state.play_state, PlayState::Paused);
+        state.play_state = PlayState::Stopped;
+        assert_eq!(state.play_state, PlayState::Stopped);
     }
 }

@@ -23,7 +23,10 @@ impl LisControlPanel {
         // ── LIS value ──────────────────────────────────────────────────────
         let prev_lis = state.lis_config.lis_value;
         ui.horizontal(|ui| {
-            ui.label("LIS frames:");
+            ui.label("LIS frames:").on_hover_text(
+                "Number of interpolated frames between each pair of time points. \
+                 Higher values produce smoother transitions but use more memory.",
+            );
             ui.add(egui::Slider::new(&mut state.lis_config.lis_value, 2..=300).integer());
         });
         if state.lis_config.lis_value != prev_lis {
@@ -32,7 +35,10 @@ impl LisControlPanel {
 
         // ── Speed ──────────────────────────────────────────────────────────
         ui.horizontal(|ui| {
-            ui.label("Speed:");
+            ui.label("Speed:").on_hover_text(
+                "Playback speed multiplier. 1.0 = normal, 2.0 = double speed, \
+                 0.5 = half speed. Logarithmic scale.",
+            );
             ui.add(
                 egui::Slider::new(&mut state.lis_config.speed, 0.1..=10.0)
                     .logarithmic(true)
@@ -74,6 +80,11 @@ impl LisControlPanel {
 
         // ── Easing ─────────────────────────────────────────────────────────
         let prev_easing = state.lis_config.easing;
+        ui.label("").on_hover_text(
+            "Easing controls the acceleration curve of interpolation between time slices. \
+             Linear = constant speed. Ease In = slow start. Ease Out = slow end. \
+             Ease In-Out = slow start and end. Spring = overshoot and settle.",
+        );
         egui::ComboBox::from_label("Easing")
             .selected_text(state.lis_config.easing.to_string())
             .show_ui(ui, |ui| {

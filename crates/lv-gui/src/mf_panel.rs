@@ -119,23 +119,38 @@ impl MfPanel {
 
         // ── Config ─────────────────────────────────────────────────────────
         ui.horizontal(|ui| {
-            ui.label("Window:");
+            ui.label("Window:").on_hover_text(
+                "Co-occurrence context window size (tokens on each side). \
+                 Larger windows capture broader semantic relationships. Typical: 5-10.",
+            );
             ui.add(egui::Slider::new(&mut self.window_size, 2..=20));
         });
         ui.horizontal(|ui| {
-            ui.label("Slide rate:");
+            ui.label("Slide rate:").on_hover_text(
+                "Step size for sliding the context window. \
+                 1 = every position, higher = skip positions (faster, less precise).",
+            );
             ui.add(egui::DragValue::new(&mut self.slide_rate).range(1..=self.window_size));
         });
         ui.horizontal(|ui| {
-            ui.label("Language:");
+            ui.label("Language:").on_hover_text(
+                "BCP 47 language code for stop-word filtering. \
+                 Examples: 'en' (English), 'de' (German), 'fr' (French).",
+            );
             ui.text_edit_singleline(&mut self.language);
         });
         ui.horizontal(|ui| {
-            ui.label("Min count:");
+            ui.label("Min count:").on_hover_text(
+                "Minimum co-occurrence count for a word pair to be included. \
+                 Higher values filter rare co-occurrences (reduces noise).",
+            );
             ui.add(egui::DragValue::new(&mut self.min_count).range(1..=1000u64));
         });
         ui.horizontal(|ui| {
-            ui.label("Min PMI:");
+            ui.label("Min PMI:").on_hover_text(
+                "Minimum PMI threshold for an edge in the co-occurrence graph. \
+                 Higher values retain only strongly associated word pairs. Typical: 0.0-2.0.",
+            );
             ui.add(
                 egui::DragValue::new(&mut self.min_pmi)
                     .speed(0.01)
@@ -143,7 +158,11 @@ impl MfPanel {
                     .fixed_decimals(3),
             );
         });
-        ui.checkbox(&mut self.use_pmi, "Use PMI (vs raw counts)");
+        ui.checkbox(&mut self.use_pmi, "Use PMI (vs raw counts)")
+            .on_hover_text(
+                "When enabled, uses Pointwise Mutual Information to weight co-occurrences. \
+                 PMI highlights statistically significant associations over raw frequency.",
+            );
 
         if self.use_pmi {
             egui::ComboBox::from_label("Similarity method")

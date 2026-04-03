@@ -80,13 +80,24 @@ mod inner {
             }
 
             ui.horizontal(|ui| {
-                ui.label("FPS:");
+                ui.label("FPS:").on_hover_text(
+                    "Frames per second for video export. Common values: 24 (film), \
+                     30 (web), 60 (smooth).",
+                );
                 ui.add(egui::DragValue::new(&mut state.export.fps).range(1..=240));
-                ui.label("CRF:");
+                ui.label("CRF:").on_hover_text(
+                    "Constant Rate Factor: 0 = lossless, 23 = default, 51 = worst quality. \
+                     Lower values produce larger, higher-quality files.",
+                );
                 ui.add(egui::DragValue::new(&mut state.export.crf).range(0..=51));
             });
             ui.horizontal(|ui| {
-                ui.label("Codec:");
+                ui.label("Codec:").on_hover_text(
+                    "Video codec for ffmpeg. Supported: libx264 (H.264, best compatibility), \
+                     libx265 (H.265, smaller files), libvpx-vp9 (VP9, web), \
+                     libaom-av1 (AV1, best quality), prores_ks (ProRes, editing), \
+                     h264_nvenc / hevc_nvenc (NVIDIA GPU-accelerated).",
+                );
                 ui.text_edit_singleline(&mut state.export.codec);
             });
 

@@ -63,9 +63,17 @@ impl ClusterFilterPanel {
         }
 
         ui.separator();
-        ui.checkbox(&mut state.cluster.ego_mode, "Show ego cluster");
+        ui.checkbox(&mut state.cluster.ego_mode, "Show ego cluster")
+            .on_hover_text(
+                "Focus the display on a single node and its direct neighbors. \
+                 Select a node in the 3D view to activate.",
+            );
         ui.horizontal(|ui| {
-            ui.label("Edge direction:");
+            ui.label("Edge direction:").on_hover_text(
+                "Which edges to include in the ego cluster. \
+                 Incoming = edges pointing to the ego. \
+                 Outgoing = edges from the ego. Both = all connected edges.",
+            );
             egui::ComboBox::from_id_salt("ego_direction")
                 .selected_text(match state.cluster.ego_direction {
                     EgoEdgeDirection::Incoming => "Incoming",
@@ -93,8 +101,13 @@ impl ClusterFilterPanel {
         ui.checkbox(
             &mut state.cluster.secondary_edges,
             "Include secondary edges",
-        );
-        ui.checkbox(&mut state.cluster.shared_only, "Shared objects only");
+        )
+        .on_hover_text("Show edges between ego neighbors (not just ego-to-neighbor edges).");
+        ui.checkbox(&mut state.cluster.shared_only, "Shared objects only")
+            .on_hover_text(
+                "Only show objects that appear in multiple time slices, \
+                 filtering out transient single-appearance nodes.",
+            );
 
         // Object list (filtered)
         if let Some(ds) = state.dataset() {

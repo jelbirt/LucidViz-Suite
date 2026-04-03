@@ -86,6 +86,11 @@ impl AsPanel {
         ui.separator();
 
         // ── Algorithm ──────────────────────────────────────────────────────
+        ui.label("").on_hover_text(
+            "MDS algorithm for embedding the distance matrix into 3D space. \
+             Auto selects Classical for small networks (<800 nodes), Pivot for larger ones. \
+             SMACOF iteratively minimizes stress. Multilevel uses hierarchical coarsening.",
+        );
         egui::ComboBox::from_label("Algorithm")
             .selected_text(format!("{:?}", self.algorithm))
             .show_ui(ui, |ui| {
@@ -118,11 +123,17 @@ impl AsPanel {
         if self.algorithm == MdsAlgorithmUi::Smacof {
             ui.indent("smacof", |ui| {
                 ui.horizontal(|ui| {
-                    ui.label("Max iter:");
+                    ui.label("Max iter:").on_hover_text(
+                        "Maximum SMACOF iterations. More iterations improve stress \
+                         but take longer. Typical: 300-1000.",
+                    );
                     ui.add(egui::DragValue::new(&mut self.smacof_max_iter).range(10..=5000));
                 });
                 ui.horizontal(|ui| {
-                    ui.label("Tolerance:");
+                    ui.label("Tolerance:").on_hover_text(
+                        "Convergence threshold for SMACOF. Iteration stops when \
+                         stress improvement drops below this value. Typical: 1e-6.",
+                    );
                     ui.add(
                         egui::DragValue::new(&mut self.smacof_tol)
                             .speed(1e-7)
