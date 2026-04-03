@@ -54,6 +54,7 @@ pub fn build_lis_buffer(dataset: &LvDataset, config: &LisConfig) -> LisBuffer {
     let transitions = if time_pts > 1 { time_pts - 1 } else { 1 };
 
     // Parallelize across transitions: each transition's frames are independent.
+    let easing = config.easing;
     let frames: Vec<LisFrame> = (0..transitions)
         .into_par_iter()
         .flat_map(|t| {
@@ -66,7 +67,8 @@ pub fn build_lis_buffer(dataset: &LvDataset, config: &LisConfig) -> LisBuffer {
 
             (0..lis)
                 .map(|k| {
-                    let alpha = k as f64 / lis as f64;
+                    let linear_alpha = k as f64 / lis as f64;
+                    let alpha = easing.apply(linear_alpha);
                     build_frame(
                         dataset,
                         rows_a,
@@ -142,7 +144,8 @@ pub fn compute_frame(dataset: &LvDataset, config: &LisConfig, slice_index: u32) 
 
     let transition_index = (slice_index / lis).min(transitions.saturating_sub(1));
     let local_slice = slice_index % lis;
-    let alpha = local_slice as f64 / lis as f64;
+    let linear_alpha = local_slice as f64 / lis as f64;
+    let alpha = config.easing.apply(linear_alpha);
 
     let t = transition_index as usize;
     let rows_a = index_sheet_rows(&dataset.sheets[t]);

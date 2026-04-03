@@ -53,6 +53,8 @@ pub struct LisConfigSnapshot {
     pub target_fps: Option<u32>,
     pub looping: bool,
     pub speed: f32,
+    #[serde(default)]
+    pub easing: lv_data::EasingMode,
 }
 
 impl From<&LisConfig> for LisConfigSnapshot {
@@ -62,6 +64,7 @@ impl From<&LisConfig> for LisConfigSnapshot {
             target_fps: c.target_fps,
             looping: c.looping,
             speed: c.speed,
+            easing: c.easing,
         }
     }
 }
@@ -73,6 +76,7 @@ impl From<LisConfigSnapshot> for LisConfig {
             target_fps: s.target_fps,
             looping: s.looping,
             speed: s.speed,
+            easing: s.easing,
         }
     }
 }
@@ -97,6 +101,8 @@ pub struct AudioSnapshot {
     pub semitone_range: i32,
     pub beats: u32,
     pub hold_slices: u32,
+    #[serde(default)]
+    pub mapping: lv_gui::state::SonificationMapping,
 }
 
 impl Default for AudioSnapshot {
@@ -109,6 +115,7 @@ impl Default for AudioSnapshot {
             semitone_range: 12,
             beats: 1,
             hold_slices: 2,
+            mapping: lv_gui::state::SonificationMapping::default(),
         }
     }
 }
@@ -297,6 +304,7 @@ mod tests {
                 target_fps: None,
                 looping: true,
                 speed: 1.0,
+                easing: lv_data::EasingMode::Linear,
             },
             slice_index: 7,
             cluster_min: 0.0,
@@ -318,6 +326,7 @@ mod tests {
                 semitone_range: 7,
                 beats: 3,
                 hold_slices: 4,
+                mapping: lv_gui::state::SonificationMapping::default(),
             },
             export: ExportSnapshot {
                 output_dir: Some(PathBuf::from("/tmp/exports")),
@@ -350,6 +359,7 @@ mod tests {
             target_fps: Some(60),
             looping: false,
             speed: 2.0,
+            easing: lv_data::EasingMode::EaseInOut,
         };
         let snap = LisConfigSnapshot::from(&lc);
         let lc2 = LisConfig::from(snap);
@@ -369,6 +379,7 @@ mod tests {
                 target_fps: None,
                 looping: true,
                 speed: 1.0,
+                easing: lv_data::EasingMode::Linear,
             },
             slice_index: 0,
             cluster_min: 0.0,

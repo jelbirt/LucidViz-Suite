@@ -1,9 +1,13 @@
 //! MDS module dispatcher.
 
 pub mod classical;
+pub mod force_directed;
+pub mod landmark;
 pub mod multilevel;
 pub mod pivot;
 pub mod smacof;
+pub mod tsne;
+pub mod umap;
 
 use anyhow::{bail, Result};
 
@@ -41,6 +45,7 @@ pub fn run_mds(
             levels,
             refine_iters,
         } => multilevel::multilevel_mds(dist, dims, *levels, *refine_iters),
+        MdsConfig::Landmark { n_landmarks } => landmark::landmark_mds(dist, dims, *n_landmarks),
     }
 }
 

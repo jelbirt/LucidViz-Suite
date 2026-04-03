@@ -367,6 +367,69 @@ pub struct LisBuffer {
     pub total_frames: u32,
 }
 
+/// Easing mode for inter-slice interpolation.
+///
+/// Controls the acceleration curve applied to the linear `alpha` parameter
+/// before position/size/color interpolation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum EasingMode {
+    /// Constant-speed interpolation (no easing).
+    #[default]
+    Linear,
+    /// Slow start, fast end (quadratic ease-in).
+    EaseIn,
+    /// Fast start, slow end (quadratic ease-out).
+    EaseOut,
+    /// Slow start and end, fast middle (cubic ease-in-out).
+    EaseInOut,
+    /// Overshoot and settle (underdamped spring approximation).
+    Spring,
+}
+
+impl EasingMode {
+    /// All variants in display order for UI combo boxes.
+    pub const ALL: &'static [EasingMode] = &[
+        EasingMode::Linear,
+        EasingMode::EaseIn,
+        EasingMode::EaseOut,
+        EasingMode::EaseInOut,
+        EasingMode::Spring,
+    ];
+
+    /// Apply the easing function to a linear `t` value in `[0, 1]`.
+    pub fn apply(self, t: f64) -> f64 {
+        match self {
+            EasingMode::Linear => t,
+            EasingMode::EaseIn => t * t,
+            EasingMode::EaseOut => 1.0 - (1.0 - t) * (1.0 - t),
+            EasingMode::EaseInOut => {
+                if t < 0.5 {
+                    4.0 * t * t * t
+                } else {
+                    1.0 - (-2.0 * t + 2.0).powi(3) / 2.0
+                }
+            }
+            EasingMode::Spring => {
+                // Underdamped spring: overshoots ~1.05 then settles.
+                // y(t) = 1 - e^{-6t} * cos(6*pi*t)
+                1.0 - (-6.0 * t).exp() * (6.0 * std::f64::consts::PI * t).cos()
+            }
+        }
+    }
+}
+
+impl fmt::Display for EasingMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            EasingMode::Linear => write!(f, "Linear"),
+            EasingMode::EaseIn => write!(f, "Ease In"),
+            EasingMode::EaseOut => write!(f, "Ease Out"),
+            EasingMode::EaseInOut => write!(f, "Ease In-Out"),
+            EasingMode::Spring => write!(f, "Spring"),
+        }
+    }
+}
+
 /// Configuration for LIS (Linear Interpolation Sweep) animation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LisConfig {
@@ -379,6 +442,8 @@ pub struct LisConfig {
     pub looping: bool,
     /// Playback speed multiplier.  Default: 1.0.
     pub speed: f32,
+    /// Easing mode for interpolation between time slices.
+    pub easing: EasingMode,
 }
 
 impl Default for LisConfig {
@@ -388,6 +453,7 @@ impl Default for LisConfig {
             target_fps: None,
             looping: true,
             speed: 1.0,
+            easing: EasingMode::default(),
         }
     }
 }
@@ -466,6 +532,56 @@ mod tests {
         assert!(cfg.looping);
         assert_eq!(cfg.speed, 1.0);
         assert!(cfg.target_fps.is_none());
+        assert_eq!(cfg.easing, EasingMode::Linear);
+    }
+
+    #[test]
+    fn easing_endpoints() {
+        // All easing modes must map 0→0 and 1→~1.
+        for &mode in EasingMode::ALL {
+            let at_zero = mode.apply(0.0);
+            let at_one = mode.apply(1.0);
+            assert!(
+                at_zero.abs() < 1e-10,
+                "{mode}: apply(0) = {at_zero}, expected 0"
+            );
+            assert!(
+                (at_one - 1.0).abs() < 0.06,
+                "{mode}: apply(1) = {at_one}, expected ~1.0"
+            );
+        }
+    }
+
+    #[test]
+    fn easing_linear_is_identity() {
+        for i in 0..=10 {
+            let t = i as f64 / 10.0;
+            assert!(
+                (EasingMode::Linear.apply(t) - t).abs() < 1e-15,
+                "linear at {t}"
+            );
+        }
+    }
+
+    #[test]
+    fn easing_ease_in_starts_slow() {
+        // At t=0.25, ease-in (t^2 = 0.0625) should be less than linear (0.25).
+        assert!(EasingMode::EaseIn.apply(0.25) < 0.25);
+    }
+
+    #[test]
+    fn easing_ease_out_starts_fast() {
+        // At t=0.25, ease-out should be greater than linear.
+        assert!(EasingMode::EaseOut.apply(0.25) > 0.25);
+    }
+
+    #[test]
+    fn easing_spring_overshoots() {
+        // Spring should exceed 1.0 at some point in [0, 1].
+        let max = (0..=100)
+            .map(|i| EasingMode::Spring.apply(i as f64 / 100.0))
+            .fold(0.0_f64, f64::max);
+        assert!(max > 1.0, "spring should overshoot, max was {max}");
     }
 
     #[test]

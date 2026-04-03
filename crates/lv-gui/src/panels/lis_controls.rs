@@ -72,6 +72,19 @@ impl LisControlPanel {
                 });
             });
 
+        // ── Easing ─────────────────────────────────────────────────────────
+        let prev_easing = state.lis_config.easing;
+        egui::ComboBox::from_label("Easing")
+            .selected_text(state.lis_config.easing.to_string())
+            .show_ui(ui, |ui| {
+                for &mode in lv_data::EasingMode::ALL {
+                    ui.selectable_value(&mut state.lis_config.easing, mode, mode.to_string());
+                }
+            });
+        if state.lis_config.easing != prev_easing {
+            ev = LisEvent::RebuildBuffer;
+        }
+
         // ── Transport ──────────────────────────────────────────────────────
         ui.separator();
         ui.horizontal(|ui| {

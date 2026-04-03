@@ -733,6 +733,7 @@ impl Renderer {
                             semitone_range: self.app_state.audio.semitone_range,
                             beats: self.app_state.audio.beats,
                             hold_slices: self.app_state.audio.hold_slices,
+                            mapping: self.app_state.audio.mapping,
                         },
                         export: ExportSnapshot {
                             output_dir: self.app_state.export.output_dir.clone(),
@@ -793,6 +794,7 @@ impl Renderer {
                         self.app_state.audio.semitone_range = snapshot.audio.semitone_range;
                         self.app_state.audio.beats = snapshot.audio.beats;
                         self.app_state.audio.hold_slices = snapshot.audio.hold_slices;
+                        self.app_state.audio.mapping = snapshot.audio.mapping;
                         self.app_state.export.output_dir = snapshot.export.output_dir.clone();
                         self.app_state.export.filename_prefix = snapshot.export.filename_prefix;
                         self.app_state.export.start_frame = snapshot.export.start_frame;

@@ -131,6 +131,10 @@ pub enum MdsAlgorithm {
     Smacof,
     PivotMds,
     Multilevel,
+    Landmark,
+    ForceDirected,
+    Tsne,
+    Umap,
 }
 
 // ---------------------------------------------------------------------------
@@ -179,6 +183,9 @@ pub enum MdsConfig {
     Multilevel {
         levels: usize,
         refine_iters: u32,
+    },
+    Landmark {
+        n_landmarks: usize,
     },
 }
 

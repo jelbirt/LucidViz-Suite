@@ -88,6 +88,18 @@ mod inner {
                     ui.label("Semitone range:");
                     ui.add(egui::Slider::new(&mut state.audio.semitone_range, 1..=24));
                 });
+
+                egui::ComboBox::from_label("Mapping")
+                    .selected_text(state.audio.mapping.to_string())
+                    .show_ui(ui, |ui| {
+                        for &mapping in crate::state::SonificationMapping::ALL {
+                            ui.selectable_value(
+                                &mut state.audio.mapping,
+                                mapping,
+                                mapping.to_string(),
+                            );
+                        }
+                    });
             }
 
             let can_test = state.audio.connected || !state.audio.ports.is_empty();

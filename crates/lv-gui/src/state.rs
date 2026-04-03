@@ -80,6 +80,42 @@ pub enum AudioRequest {
     TestTone,
 }
 
+/// Sonification mapping preset — determines how data dimensions map to MIDI parameters.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum SonificationMapping {
+    /// Centrality magnitude → pitch (default graduated behavior).
+    #[default]
+    CentralityToPitch,
+    /// Degree centrality → velocity (louder nodes have more connections).
+    DegreeToVelocity,
+    /// Betweenness centrality → pitch, closeness → velocity.
+    BetweennessPitchClosenessVelocity,
+    /// Cluster membership index → MIDI channel (up to 16 clusters).
+    ClusterToChannel,
+}
+
+impl SonificationMapping {
+    pub const ALL: &'static [SonificationMapping] = &[
+        SonificationMapping::CentralityToPitch,
+        SonificationMapping::DegreeToVelocity,
+        SonificationMapping::BetweennessPitchClosenessVelocity,
+        SonificationMapping::ClusterToChannel,
+    ];
+}
+
+impl std::fmt::Display for SonificationMapping {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SonificationMapping::CentralityToPitch => write!(f, "Centrality → Pitch"),
+            SonificationMapping::DegreeToVelocity => write!(f, "Degree → Velocity"),
+            SonificationMapping::BetweennessPitchClosenessVelocity => {
+                write!(f, "Betweenness → Pitch, Closeness → Velocity")
+            }
+            SonificationMapping::ClusterToChannel => write!(f, "Cluster → Channel"),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum SessionRequest {
     RefreshList,
@@ -172,6 +208,7 @@ pub struct AudioState {
     pub semitone_range: i32,
     pub beats: u32,
     pub hold_slices: u32,
+    pub mapping: SonificationMapping,
     pub status: Option<String>,
 }
 
@@ -188,6 +225,7 @@ impl Default for AudioState {
             semitone_range: 12,
             beats: 1,
             hold_slices: 2,
+            mapping: SonificationMapping::default(),
             status: None,
         }
     }
