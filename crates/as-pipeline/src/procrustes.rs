@@ -104,9 +104,9 @@ pub fn procrustes(
         1.0
     };
 
-    // Translation: t = mu_B - ss * mu_A * R^T
+    // Translation: t = mu_B - ss * mu_A * R
     let mu_a_row = DMatrix::from_row_slice(1, dims, &mu_a);
-    let t_mat = DMatrix::from_row_slice(1, dims, &mu_b) - ss * &mu_a_row * r.transpose();
+    let t_mat = DMatrix::from_row_slice(1, dims, &mu_b) - ss * &mu_a_row * &r;
     let translation: Vec<f64> = (0..dims).map(|d| t_mat[(0, d)]).collect();
 
     // Apply to ALL source points.
@@ -353,8 +353,7 @@ pub fn procrustes_weighted(
 
             // Translation uses weighted centroids (consistent with the rotation).
             let mu_a_row = DMatrix::from_row_slice(1, dims, &src_wmeans);
-            let t_mat =
-                DMatrix::from_row_slice(1, dims, &tgt_wmeans) - ss * &mu_a_row * r.transpose();
+            let t_mat = DMatrix::from_row_slice(1, dims, &tgt_wmeans) - ss * &mu_a_row * &r;
             let translation: Vec<f64> = (0..dims).map(|d| t_mat[(0, d)]).collect();
 
             let n = source.n;
