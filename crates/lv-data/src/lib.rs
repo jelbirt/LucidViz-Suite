@@ -3,6 +3,7 @@
 pub mod analysis;
 pub mod bridge;
 pub mod error;
+#[cfg(feature = "native-io")]
 pub mod io_util;
 pub mod schema;
 pub mod validation;
