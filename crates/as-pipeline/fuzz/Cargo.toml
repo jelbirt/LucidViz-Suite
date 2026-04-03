@@ -1,0 +1,20 @@
+[package]
+name = "as-pipeline-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+as-pipeline = { path = ".." }
+
+[[bin]]
+name = "fuzz_distance_matrix"
+path = "fuzz_targets/fuzz_distance_matrix.rs"
+test = false
+doc = false
+
+[workspace]

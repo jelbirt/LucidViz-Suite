@@ -30,6 +30,7 @@ getrandom = { workspace = true, optional = true, features = ["wasm_js"] }
 
 [dev-dependencies]
 criterion.workspace = true
+proptest.workspace  = true
 rand.workspace      = true
 
 [[bench]]

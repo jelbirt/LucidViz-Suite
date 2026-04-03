@@ -71,6 +71,9 @@ getrandom = { version = "0.3" }
 dirs-next = "2.0"
 tempfile  = "3"
 
+# Property-based testing
+proptest = "1"
+
 # Benchmarking
 criterion = { version = "0.8", features = ["html_reports"] }
 
