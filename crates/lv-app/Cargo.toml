@@ -32,6 +32,7 @@ mf-pipeline  = { path = "../mf-pipeline", default-features = false }
 lv-audio     = { path = "../lv-audio",   optional = true }
 lv-export    = { path = "../lv-export",  optional = true }
 
+ndarray.workspace    = true
 wgpu.workspace       = true
 winit.workspace      = true
 egui.workspace       = true
