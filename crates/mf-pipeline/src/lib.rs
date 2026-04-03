@@ -6,9 +6,12 @@ pub mod centrality;
 pub mod cooccurrence;
 pub mod error;
 pub mod graph;
+#[cfg(feature = "native-io")]
 pub mod ingest;
 pub mod normalize;
+#[cfg(feature = "native-io")]
 pub mod output;
+#[cfg(feature = "native-io")]
 pub mod pipeline;
 pub mod pmi;
 pub mod stopwords;

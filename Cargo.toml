@@ -9,6 +9,7 @@ members = [
     "crates/mf-pipeline",
     "crates/lv-audio",
     "crates/lv-export",
+    "crates/lv-wasm",
 ]
 
 [workspace.package]

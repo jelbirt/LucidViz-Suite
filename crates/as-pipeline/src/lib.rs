@@ -6,6 +6,7 @@ pub mod centrality;
 pub mod error;
 pub mod mds;
 pub mod normalize;
+#[cfg(feature = "native-io")]
 pub mod output;
 pub mod pipeline;
 pub mod procrustes;

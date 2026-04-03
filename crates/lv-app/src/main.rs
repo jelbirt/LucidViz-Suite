@@ -25,8 +25,8 @@ use lv_renderer::{
 use notifications::NotificationQueue;
 use prefs::UserPreferences;
 use session::{
-    list_sessions, load_session, save_session, AudioSnapshot, EgoSnapshot, ExportSnapshot,
-    LisConfigSnapshot, SessionSnapshot,
+    delete_session, list_sessions, load_session, rename_session, save_session, AudioSnapshot,
+    EgoSnapshot, ExportSnapshot, LisConfigSnapshot, SessionSnapshot,
 };
 
 #[cfg(feature = "audio")]
@@ -753,6 +753,21 @@ impl Renderer {
                         format!("Saved session '{name}'.")
                     })
                 }
+                lv_gui::state::SessionRequest::Delete(name) => delete_session(&name).map(|_| {
+                    self.app_state.session.saved_sessions = list_sessions();
+                    if self.app_state.session.name == name {
+                        self.app_state.session.name.clear();
+                    }
+                    format!("Deleted session '{name}'.")
+                }),
+                lv_gui::state::SessionRequest::Rename { from, to } => rename_session(&from, &to)
+                    .map(|_| {
+                        self.app_state.session.saved_sessions = list_sessions();
+                        if self.app_state.session.name == from {
+                            self.app_state.session.name = to.clone();
+                        }
+                        format!("Renamed '{from}' to '{to}'.")
+                    }),
                 lv_gui::state::SessionRequest::Load(name) => {
                     load_session(&name).and_then(|snapshot| {
                         if let Some(path) = snapshot.source_path.clone() {
@@ -814,6 +829,7 @@ impl Renderer {
                     })
                 }
             };
+            self.app_state.session.loading = false;
             self.app_state.session.status = Some(match result {
                 Ok(msg) => msg,
                 Err(err) => format!("Session error: {err:#}"),

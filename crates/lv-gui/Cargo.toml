@@ -14,8 +14,8 @@ video-export = ["export"]
 
 [dependencies]
 lv-data.path     = "../lv-data"
-as-pipeline.path = "../as-pipeline"
-mf-pipeline.path = "../mf-pipeline"
+as-pipeline = { path = "../as-pipeline", features = ["native-io"] }
+mf-pipeline = { path = "../mf-pipeline", features = ["native-io"] }
 lv-audio         = { path = "../lv-audio", optional = true }
 lv-export        = { path = "../lv-export", optional = true }
 

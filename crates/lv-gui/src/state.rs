@@ -85,6 +85,8 @@ pub enum SessionRequest {
     RefreshList,
     Save(String),
     Load(String),
+    Delete(String),
+    Rename { from: String, to: String },
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -198,6 +200,10 @@ pub struct SessionState {
     pub name: String,
     pub saved_sessions: Vec<String>,
     pub status: Option<String>,
+    pub loading: bool,
+    pub confirm_delete: Option<String>,
+    pub renaming: Option<String>,
+    pub rename_buffer: String,
 }
 
 /// Grouped cluster-filter state.

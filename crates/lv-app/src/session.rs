@@ -221,6 +221,39 @@ fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
     Ok(lv_data::io_util::atomic_write(path, bytes)?)
 }
 
+/// Delete a saved session by name.
+pub fn delete_session(name: &str) -> Result<()> {
+    let path = session_path(name).context("cannot determine home directory")?;
+    if path.exists() {
+        std::fs::remove_file(&path).with_context(|| format!("delete session {:?}", path))?;
+    }
+    Ok(())
+}
+
+/// Rename a saved session.
+pub fn rename_session(old_name: &str, new_name: &str) -> Result<()> {
+    let old_path = session_path(old_name).context("cannot determine home directory")?;
+    let new_path = session_path(new_name).context("cannot determine home directory")?;
+    if !old_path.exists() {
+        anyhow::bail!("session '{old_name}' does not exist");
+    }
+    if new_path.exists() {
+        anyhow::bail!("session '{new_name}' already exists");
+    }
+    // Load, update name, save under new path, delete old.
+    let bytes = read_bounded_file(&old_path, MAX_SESSION_BYTES)
+        .with_context(|| format!("read session {:?}", old_path))?;
+    let mut snapshot: SessionSnapshot =
+        serde_json::from_slice(&bytes).with_context(|| format!("parse session {:?}", old_path))?;
+    snapshot.name = new_name.to_string();
+    let json = serde_json::to_string_pretty(&snapshot).context("serialise session")?;
+    atomic_write(&new_path, json.as_bytes())
+        .with_context(|| format!("write session {:?}", new_path))?;
+    std::fs::remove_file(&old_path)
+        .with_context(|| format!("remove old session {:?}", old_path))?;
+    Ok(())
+}
+
 /// List all saved session names (stem of each `*.json` in the sessions dir).
 pub fn list_sessions() -> Vec<String> {
     let Some(dir) = sessions_dir() else {

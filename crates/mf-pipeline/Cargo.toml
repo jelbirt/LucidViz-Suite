@@ -9,11 +9,11 @@ publish.workspace = true
 
 [features]
 default   = []
-native-io = []   # gate file I/O
+native-io = ["lv-data/native-io"]   # file I/O (ingest, output, pipeline); disable for wasm32
 wasm      = ["dep:getrandom"]   # wasm32-unknown-unknown compatibility
 
 [dependencies]
-lv-data.path     = "../lv-data"
+lv-data = { path = "../lv-data", default-features = false }
 
 nalgebra.workspace              = true
 unicode-normalization.workspace = true
@@ -29,7 +29,7 @@ thiserror.workspace             = true
 getrandom = { workspace = true, optional = true, features = ["wasm_js"] }
 
 [dev-dependencies]
-as-pipeline.path = "../as-pipeline"
+as-pipeline = { path = "../as-pipeline", features = ["native-io"] }
 tempfile = "3"
 calamine.workspace  = true
 criterion.workspace = true
@@ -38,6 +38,7 @@ rand.workspace      = true
 [[test]]
 name = "mf_pipeline_e2e"
 path = "../../tests/integration/mf_pipeline_e2e.rs"
+required-features = ["native-io"]
 
 [[bench]]
 name    = "mf_bench"

@@ -9,11 +9,11 @@ publish.workspace = true
 
 [features]
 default   = []
-native-io = []   # I/O helpers (gate file reading behind this)
+native-io = ["lv-data/native-io"]   # file I/O (XLSX/JSON output); disable for wasm32
 wasm      = ["dep:getrandom"]   # wasm32-unknown-unknown compatibility
 
 [dependencies]
-lv-data.path = "../lv-data"
+lv-data = { path = "../lv-data", default-features = false }
 
 nalgebra.workspace        = true
 ndarray.workspace         = true

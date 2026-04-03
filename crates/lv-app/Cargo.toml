@@ -20,15 +20,15 @@ audio      = ["dep:lv-audio", "lv-gui/audio"]
 midi       = ["audio", "lv-audio/midi"]
 export     = ["dep:lv-export", "lv-gui/export"]
 video-export = ["export", "lv-export/video-export", "lv-gui/video-export"]
-native-io  = []
+native-io  = ["as-pipeline/native-io", "mf-pipeline/native-io"]
 wasm       = []
 
 [dependencies]
 lv-renderer  = { path = "../lv-renderer" }
 lv-gui       = { path = "../lv-gui" }
 lv-data      = { path = "../lv-data" }
-as-pipeline  = { path = "../as-pipeline" }
-mf-pipeline  = { path = "../mf-pipeline" }
+as-pipeline  = { path = "../as-pipeline", default-features = false }
+mf-pipeline  = { path = "../mf-pipeline", default-features = false }
 lv-audio     = { path = "../lv-audio",   optional = true }
 lv-export    = { path = "../lv-export",  optional = true }
 
