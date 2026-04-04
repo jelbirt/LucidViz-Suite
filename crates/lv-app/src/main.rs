@@ -857,10 +857,17 @@ impl Renderer {
                 self.app_state.session.confirm_delete = None;
                 self.app_state.session.renaming = None;
             }
-            self.app_state.session.status = Some(match result {
-                Ok(msg) => msg,
-                Err(err) => format!("Session error: {err:#}"),
-            });
+            match result {
+                Ok(msg) => {
+                    self.app_state.session.status = Some(msg);
+                }
+                Err(err) => {
+                    let msg = format!("Session error: {err:#}");
+                    self.notifications
+                        .push(notifications::Notification::error(&msg));
+                    self.app_state.session.status = Some(msg);
+                }
+            }
         }
     }
 
@@ -1146,6 +1153,12 @@ impl Renderer {
         // Push undo snapshot before processing state-changing events.
         if self.app_state.pending_dataset_load.is_some() || self.app_state.rebuild_lis {
             self.undo_stack.push(self.app_state.snapshot());
+        }
+
+        // Surface file-load errors as toast notifications.
+        if let Some(ref err) = self.app_state.load_error.take() {
+            self.notifications
+                .push(notifications::Notification::error(err.clone()));
         }
 
         if let Some(pending) = self.app_state.pending_dataset_load.take() {

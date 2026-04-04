@@ -130,12 +130,18 @@ impl ArcballCamera {
         if let Some((ox, oy)) = self.drag_right.take() {
             let dx = (x - ox) as f32 * PAN_SPEED * self.distance * self.speed;
             let dy = (y - oy) as f32 * PAN_SPEED * self.distance * self.speed;
-            // Pan in camera's right and up axes
+            // Pan in camera's right and up axes (pitch-aware)
             let yaw_r = self.yaw.to_radians();
+            let pitch_r = self.pitch.to_radians();
             let right = Vector3::new(yaw_r.cos(), 0.0, -yaw_r.sin());
-            let up_w = Vector3::y();
+            let forward = Vector3::new(
+                -pitch_r.cos() * yaw_r.sin(),
+                -pitch_r.sin(),
+                -pitch_r.cos() * yaw_r.cos(),
+            );
+            let up = right.cross(&forward).normalize();
             self.target -= right * dx;
-            self.target += up_w * dy;
+            self.target += up * dy;
             self.drag_right = Some((x, y));
             changed = true;
         }

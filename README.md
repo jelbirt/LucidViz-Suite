@@ -120,15 +120,17 @@ cargo build --target wasm32-unknown-unknown \
             -p lv-data
 ```
 
-> **Note:** Only `lv-data`'s no-I/O schema layer is CI-checked for `wasm32-unknown-unknown` right now.
-> `as-pipeline`, `mf-pipeline`, and `lv-app` still expose placeholder `wasm` flags, but their full
-> dependency stack is not yet supported as a shipped WASM target in this release.
+> **Note:** `lv-data`, `as-pipeline`, and `mf-pipeline` are CI-checked for `wasm32-unknown-unknown`.
+> `lv-wasm` exposes `run_mf`, `run_mf_to_coordinates`, and `run_as` via `wasm_bindgen`.
+> A demo page is available at `crates/lv-wasm/www/index.html`. The full rayon-based parallelism
+> stack is not yet supported in the browser without `wasm-bindgen-rayon`.
 
 ## Current runtime status
 
-- `lv-export` has working library/demo paths, but the desktop app's Export panel is currently disabled pending full `lv-app` integration.
-- `lv-audio` contains the MIDI backend, but the desktop app's Audio / MIDI panel is currently informational and not connected to a live runtime engine.
-- Session persistence helpers exist in `crates/lv-app/src/session.rs`, but save/load session UI is not yet exposed in the desktop app.
+- **Export panel** is fully wired: PNG snapshots, frame sequences, and ffmpeg video export.
+- **Audio / MIDI panel** is fully wired: live MIDI output with graduated beats, sonification mapping presets, and configurable beat scheduling.
+- **Session management** is fully wired: save, load, rename, and delete sessions from `~/.lucid-viz/sessions/`.
+- **Headless mode**: `--headless --input <path> --output <path>` runs the AS pipeline without a window.
 
 ## Native installer
 

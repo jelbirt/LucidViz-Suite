@@ -5,10 +5,6 @@
 //! filter bounds, and ego-cluster settings so the user can resume a working
 //! state across launches.
 
-// These items are part of the public API surface; they will be used when the
-// session management UI is wired up.
-#![allow(dead_code)]
-
 use crate::app_state::EgoClusterState;
 use anyhow::{Context, Result};
 use lv_data::LisConfig;

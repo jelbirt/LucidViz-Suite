@@ -8,10 +8,10 @@ use std::time::{Duration, Instant};
 // ── Notification ──────────────────────────────────────────────────────────────
 
 /// Severity level of a notification.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NotifLevel {
     Info,
+    #[allow(dead_code)]
     Warning,
     Error,
 }
@@ -28,11 +28,9 @@ pub struct Notification {
 }
 
 impl Notification {
-    #[allow(dead_code)]
     const LIFETIME: Duration = Duration::from_secs(5);
 
     /// Create an info-level notification.
-    #[allow(dead_code)]
     pub fn info(msg: impl Into<String>) -> Self {
         Self {
             message: msg.into(),
@@ -52,7 +50,6 @@ impl Notification {
     }
 
     /// Create an error-level notification.
-    #[allow(dead_code)]
     pub fn error(msg: impl Into<String>) -> Self {
         Self {
             message: msg.into(),
@@ -76,7 +73,6 @@ pub struct NotificationQueue {
 }
 
 impl NotificationQueue {
-    #[allow(dead_code)]
     pub fn push(&mut self, notif: Notification) {
         self.toasts.push(notif);
     }
