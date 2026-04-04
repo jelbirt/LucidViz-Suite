@@ -1901,12 +1901,21 @@ impl ApplicationHandler for App {
         if self.window.is_some() {
             return;
         }
-        let attrs = Window::default_attributes()
+        let mut attrs = Window::default_attributes()
             .with_title("Lucid Visualization Suite")
             .with_inner_size(winit::dpi::LogicalSize::new(
                 self.prefs.window_width,
                 self.prefs.window_height,
             ));
+        // Set window icon from embedded PNG.
+        let icon_data = include_bytes!("../../../assets/icons/lucid-viz.png");
+        if let Ok(img) = image::load_from_memory(icon_data) {
+            let rgba = img.to_rgba8();
+            let (w, h) = (rgba.width(), rgba.height());
+            if let Ok(icon) = winit::window::Icon::from_rgba(rgba.into_raw(), w, h) {
+                attrs = attrs.with_window_icon(Some(icon));
+            }
+        }
         let window = match event_loop.create_window(attrs) {
             Ok(window) => Arc::new(window),
             Err(err) => {

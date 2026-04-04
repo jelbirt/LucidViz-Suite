@@ -2502,6 +2502,7 @@ dependencies = [
  "egui-winit",
  "env_logger",
  "human-panic",
+ "image",
  "log",
  "lv-audio",
  "lv-data",

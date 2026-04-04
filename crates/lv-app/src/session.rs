@@ -284,12 +284,6 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    fn with_tmp_home(f: impl FnOnce()) {
-        // We can't easily override dirs_next::home_dir, so we test serialisation
-        // directly instead.
-        let _ = f;
-    }
-
     #[test]
     fn snapshot_round_trip() {
         let snap = SessionSnapshot {
@@ -401,6 +395,101 @@ mod tests {
         let snap2: SessionSnapshot = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(snap2.name, "demo");
         assert_eq!(snap2.lis_config.lis_value, 30);
+    }
+
+    #[test]
+    fn save_load_round_trip_all_fields() {
+        let dir = TempDir::new().unwrap();
+        let snap = SessionSnapshot {
+            name: "full_check".to_string(),
+            source_path: Some(PathBuf::from("/data/corpus.xlsx")),
+            lis_config: LisConfigSnapshot {
+                lis_value: 120,
+                target_fps: Some(60),
+                looping: false,
+                speed: 2.5,
+                easing: lv_data::EasingMode::Spring,
+            },
+            slice_index: 42,
+            cluster_min: -3.5,
+            cluster_max: 7.2,
+            ego_mode: true,
+            ego: EgoSnapshot {
+                selected: Some("central_node".to_string()),
+                show_secondary: true,
+                direction: EgoEdgeDirection::Incoming,
+                shared_objects_only: true,
+                cluster_value_min: -3.5,
+                cluster_value_max: 7.2,
+            },
+            audio: AudioSnapshot {
+                selected_port: "MIDI Out 2".into(),
+                live_enabled: true,
+                volume: 0.6,
+                graduated: true,
+                semitone_range: 24,
+                beats: 4,
+                hold_slices: 3,
+                mapping: lv_gui::state::SonificationMapping::ClusterToChannel,
+            },
+            export: ExportSnapshot {
+                output_dir: Some(PathBuf::from("/tmp/out")),
+                filename_prefix: "render".into(),
+                start_frame: 10,
+                end_frame: 200,
+                width: 3840,
+                height: 2160,
+                format: ExportImageFormat::Tga,
+                fps: 60,
+                crf: 18,
+                codec: "libx265".into(),
+            },
+        };
+
+        let path = dir.path().join("full_check.json");
+        let json = serde_json::to_string_pretty(&snap).unwrap();
+        std::fs::write(&path, &json).unwrap();
+
+        let bytes = std::fs::read(&path).unwrap();
+        let loaded: SessionSnapshot = serde_json::from_slice(&bytes).unwrap();
+
+        // Verify every field round-trips correctly.
+        assert_eq!(loaded.name, "full_check");
+        assert_eq!(loaded.source_path, Some(PathBuf::from("/data/corpus.xlsx")));
+        assert_eq!(loaded.lis_config.lis_value, 120);
+        assert_eq!(loaded.lis_config.target_fps, Some(60));
+        assert!(!loaded.lis_config.looping);
+        assert!((loaded.lis_config.speed - 2.5).abs() < 1e-10);
+        assert_eq!(loaded.lis_config.easing, lv_data::EasingMode::Spring);
+        assert_eq!(loaded.slice_index, 42);
+        assert!((loaded.cluster_min - (-3.5)).abs() < 1e-10);
+        assert!((loaded.cluster_max - 7.2).abs() < 1e-10);
+        assert!(loaded.ego_mode);
+        assert_eq!(loaded.ego.selected, Some("central_node".to_string()));
+        assert!(loaded.ego.show_secondary);
+        assert_eq!(loaded.ego.direction, EgoEdgeDirection::Incoming);
+        assert!(loaded.ego.shared_objects_only);
+        assert_eq!(loaded.audio.selected_port, "MIDI Out 2");
+        assert!(loaded.audio.live_enabled);
+        assert!((loaded.audio.volume - 0.6).abs() < 1e-6);
+        assert!(loaded.audio.graduated);
+        assert_eq!(loaded.audio.semitone_range, 24);
+        assert_eq!(loaded.audio.beats, 4);
+        assert_eq!(loaded.audio.hold_slices, 3);
+        assert_eq!(
+            loaded.audio.mapping,
+            lv_gui::state::SonificationMapping::ClusterToChannel
+        );
+        assert_eq!(loaded.export.output_dir, Some(PathBuf::from("/tmp/out")));
+        assert_eq!(loaded.export.filename_prefix, "render");
+        assert_eq!(loaded.export.start_frame, 10);
+        assert_eq!(loaded.export.end_frame, 200);
+        assert_eq!(loaded.export.width, 3840);
+        assert_eq!(loaded.export.height, 2160);
+        assert_eq!(loaded.export.format, ExportImageFormat::Tga);
+        assert_eq!(loaded.export.fps, 60);
+        assert_eq!(loaded.export.crf, 18);
+        assert_eq!(loaded.export.codec, "libx265");
     }
 
     #[test]

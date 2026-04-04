@@ -126,6 +126,18 @@ jobs:
           --features wasm
           -p mf-pipeline
 
+      - name: Build lv-wasm for wasm32
+        run: >
+          cargo build
+          --target wasm32-unknown-unknown
+          -p lv-wasm
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Build lv-wasm with wasm-pack
+        run: wasm-pack build crates/lv-wasm --target web --no-typescript
+
   security:
     name: Security audit
     runs-on: ubuntu-latest

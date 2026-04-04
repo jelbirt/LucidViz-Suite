@@ -333,3 +333,66 @@ mod tests {
         );
     }
 }
+
+// ── wasm_bindgen_test (run with wasm-pack test) ──────────────────────────────
+
+#[cfg(all(test, target_arch = "wasm32"))]
+mod wasm_tests {
+    use super::*;
+    use wasm_bindgen_test::*;
+
+    wasm_bindgen_test_configure!(run_in_browser);
+
+    const SAMPLE_TEXT: &str = "\
+        Networks connect individuals and ideas in complex relationships. \
+        Data analysis reveals patterns hidden within large information. \
+        Visualization tools help understand complex abstract concepts. \
+        Centrality measures identify influential nodes within structures. \
+        Semantic similarity between words measured using co occurrence.";
+
+    #[wasm_bindgen_test]
+    fn run_mf_returns_valid_json() {
+        let result = run_mf(SAMPLE_TEXT, "{}").expect("run_mf should succeed");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&result).expect("result should be valid JSON");
+        assert!(parsed["labels"].is_array());
+        assert!(!parsed["labels"].as_array().unwrap().is_empty());
+    }
+
+    #[wasm_bindgen_test]
+    fn run_mf_to_coordinates_returns_3d_points() {
+        let result =
+            run_mf_to_coordinates(SAMPLE_TEXT, "{}").expect("run_mf_to_coordinates should succeed");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&result).expect("result should be valid JSON");
+        let coords = parsed["coordinates"].as_array().expect("coordinates array");
+        assert!(!coords.is_empty());
+        for pt in coords {
+            assert!(pt["x"].is_f64(), "x should be f64");
+            assert!(pt["y"].is_f64(), "y should be f64");
+            assert!(pt["z"].is_f64(), "z should be f64");
+            assert!(pt["label"].is_string(), "label should be string");
+        }
+        assert!(parsed["stress"].is_f64());
+        assert!(parsed["node_count"].is_u64());
+    }
+
+    #[wasm_bindgen_test]
+    fn run_as_returns_valid_coordinates() {
+        let labels = serde_json::to_string(&["a", "b", "c"]).unwrap();
+        let distances =
+            serde_json::to_string(&[0.0, 1.0, 2.0, 1.0, 0.0, 1.5, 2.0, 1.5, 0.0]).unwrap();
+        let result = run_as(&labels, &distances).expect("run_as should succeed");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&result).expect("result should be valid JSON");
+        let coords = parsed["coordinates"].as_array().expect("coordinates array");
+        assert_eq!(coords.len(), 3);
+    }
+
+    #[wasm_bindgen_test]
+    fn run_mf_rejects_empty_corpus() {
+        let err = run_mf("", "{}").expect_err("empty corpus should fail");
+        let msg = format!("{err}");
+        assert!(msg.contains("empty"), "error should mention empty: {msg}");
+    }
+}
