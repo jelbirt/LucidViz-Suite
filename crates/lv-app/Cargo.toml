@@ -48,6 +48,7 @@ rand.workspace       = true
 bytemuck.workspace   = true
 nalgebra.workspace   = true
 dirs-next.workspace  = true
+human-panic.workspace = true
 
 [dev-dependencies]
 tempfile.workspace   = true

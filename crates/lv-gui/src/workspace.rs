@@ -45,6 +45,8 @@ pub struct LucidWorkspace {
     pub lv_panels: LvPanels,
     pub as_panel: AsPanel,
     pub mf_panel: MfPanel,
+    show_about: bool,
+    show_shortcuts: bool,
 }
 
 impl LucidWorkspace {
@@ -59,14 +61,75 @@ impl LucidWorkspace {
     pub fn show(&mut self, ctx: &Context, state: &mut AppState) -> bool {
         let mut needs_rebuild = false;
 
-        // ── Top bar: tab selector ───────────────────────────────────────────
+        // ── Top bar: tab selector + utility buttons ──────────────────────────
         TopBottomPanel::top("tab_bar").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut self.active_tab, ActiveTab::LV, "LV");
                 ui.selectable_value(&mut self.active_tab, ActiveTab::AlignSpace, "AlignSpace");
                 ui.selectable_value(&mut self.active_tab, ActiveTab::MatrixForge, "MatrixForge");
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.small_button("About").clicked() {
+                        self.show_about = !self.show_about;
+                    }
+                    if ui.small_button("Shortcuts").clicked() {
+                        self.show_shortcuts = !self.show_shortcuts;
+                    }
+                });
             });
         });
+
+        // ── About dialog ─────────────────────────────────────────────────────
+        if self.show_about {
+            egui::Window::new("About Lucid Visualization Suite")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .open(&mut self.show_about)
+                .show(ctx, |ui| {
+                    ui.heading("Lucid Visualization Suite");
+                    ui.label(format!("Version {}", env!("CARGO_PKG_VERSION")));
+                    ui.separator();
+                    ui.label("GPU-accelerated 3D network visualization");
+                    ui.label("for social-scientific data.");
+                    ui.separator();
+                    ui.label("License: MIT OR Apache-2.0");
+                    ui.label(env!("CARGO_PKG_AUTHORS"));
+                });
+        }
+
+        // ── Keyboard shortcuts reference ─────────────────────────────────────
+        if self.show_shortcuts {
+            egui::Window::new("Keyboard Shortcuts")
+                .collapsible(true)
+                .resizable(false)
+                .open(&mut self.show_shortcuts)
+                .show(ctx, |ui| {
+                    egui::Grid::new("shortcut_grid")
+                        .striped(true)
+                        .show(ui, |ui| {
+                            let shortcuts = [
+                                ("Space", "Play / Pause"),
+                                ("N", "Next time slice"),
+                                ("P", "Previous time slice"),
+                                ("Ctrl+S", "Save session"),
+                                ("Ctrl+Z", "Undo"),
+                                ("Ctrl+Shift+Z", "Redo"),
+                                ("Arrow keys", "Orbit camera"),
+                                ("F", "Zoom in"),
+                                ("S", "Zoom out"),
+                                ("C", "Centre camera"),
+                                ("Backspace", "Reset camera"),
+                                ("Right-drag", "Pan camera"),
+                                ("Scroll", "Zoom"),
+                            ];
+                            for (key, action) in shortcuts {
+                                ui.strong(key);
+                                ui.label(action);
+                                ui.end_row();
+                            }
+                        });
+                });
+        }
 
         // ── Main panel: tab contents ────────────────────────────────────────
         CentralPanel::default().show(ctx, |ui| match self.active_tab {

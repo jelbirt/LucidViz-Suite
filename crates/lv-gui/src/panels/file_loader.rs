@@ -68,6 +68,33 @@ impl FileLoaderPanel {
             }
         }
 
+        // ── Recent files ──────────────────────────────────────────────
+        if !state.recent_files.is_empty() {
+            ui.separator();
+            ui.label("Recent files:");
+            for path in state.recent_files.clone() {
+                let label = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("<unknown>");
+                if ui
+                    .small_button(label)
+                    .on_hover_text(path.display().to_string())
+                    .clicked()
+                {
+                    let result = if path.extension().and_then(|e| e.to_str()) == Some("json") {
+                        load_dataset_json(&path).map_err(|e| e.to_string())
+                    } else {
+                        read_lv_xlsx(&path).map_err(|e| e.to_string())
+                    };
+                    match result {
+                        Ok(dataset) => ev = FileLoaderEvent::Loaded { dataset, path },
+                        Err(e) => ev = FileLoaderEvent::Error(e),
+                    }
+                }
+            }
+        }
+
         ui.separator();
 
         // Dataset summary

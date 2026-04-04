@@ -345,6 +345,13 @@ struct Renderer {
     edge_uniform_buf: wgpu::Buffer,
     window_size: (u32, u32),
     last_click_pos: Option<(f64, f64)>,
+    // Post-process (FXAA)
+    pp_pipeline: wgpu::RenderPipeline,
+    pp_bind_group_layout: wgpu::BindGroupLayout,
+    pp_bind_group: wgpu::BindGroup,
+    pp_sampler: wgpu::Sampler,
+    scene_texture: wgpu::Texture,
+    scene_view: wgpu::TextureView,
     // Modifier key tracking for keyboard shortcuts
     modifiers: winit::keyboard::ModifiersState,
     // Undo/redo
@@ -369,6 +376,7 @@ impl Renderer {
         app_state.lis_config = lis_config.clone();
         app_state.sync_runtime_snapshot(&dataset, dataset.source_path.clone(), &lis_buffer, 0);
         app_state.session.saved_sessions = list_sessions();
+        app_state.recent_files = prefs.recent_files.clone();
 
         let size = window.inner_size();
         let aspect = size.width as f32 / size.height.max(1) as f32;
@@ -557,6 +565,90 @@ impl Renderer {
             });
 
         let depth_view = Self::make_depth_view(&ctx.device, size.width.max(1), size.height.max(1));
+
+        // ── Post-process (FXAA) pipeline ──────────────────────────────────
+        let pp_shader = ctx
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("postprocess"),
+                source: wgpu::ShaderSource::Wgsl(
+                    include_str!("../../../assets/shaders/postprocess.wgsl").into(),
+                ),
+            });
+        let pp_bind_group_layout =
+            ctx.device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("pp_bgl"),
+                    entries: &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Texture {
+                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                                multisampled: false,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                            count: None,
+                        },
+                    ],
+                });
+        let pp_pipeline_layout =
+            ctx.device
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("pp_layout"),
+                    bind_group_layouts: &[&pp_bind_group_layout],
+                    push_constant_ranges: &[],
+                });
+        let pp_pipeline = ctx
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("pp_pipeline"),
+                layout: Some(&pp_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &pp_shader,
+                    entry_point: Some("vs_main"),
+                    buffers: &[],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &pp_shader,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: ctx.config.format,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    ..Default::default()
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
+                cache: None,
+            });
+        let pp_sampler = ctx.device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("pp_sampler"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        let (scene_texture, scene_view) = Self::make_scene_texture(
+            &ctx.device,
+            &ctx.config,
+            size.width.max(1),
+            size.height.max(1),
+        );
+        let pp_bind_group =
+            Self::make_pp_bind_group(&ctx.device, &pp_bind_group_layout, &scene_view, &pp_sampler);
         let shape_meshes = ShapeMeshes::build(&ctx.device, Lod::Mid);
         let inst_buf = InstanceBuffer::new();
 
@@ -610,6 +702,12 @@ impl Renderer {
             edge_uniform_buf,
             window_size: (size.width, size.height),
             last_click_pos: None,
+            pp_pipeline,
+            pp_bind_group_layout,
+            pp_bind_group,
+            pp_sampler,
+            scene_texture,
+            scene_view,
             modifiers: winit::keyboard::ModifiersState::empty(),
             undo_stack: lv_gui::UndoStack::default(),
             prefs,
@@ -1059,12 +1157,67 @@ impl Renderer {
             .create_view(&wgpu::TextureViewDescriptor::default())
     }
 
+    fn make_scene_texture(
+        device: &wgpu::Device,
+        config: &wgpu::SurfaceConfiguration,
+        w: u32,
+        h: u32,
+    ) -> (wgpu::Texture, wgpu::TextureView) {
+        let tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("scene_color"),
+            size: wgpu::Extent3d {
+                width: w.max(1),
+                height: h.max(1),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: config.format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
+        (tex, view)
+    }
+
+    fn make_pp_bind_group(
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+        scene_view: &wgpu::TextureView,
+        sampler: &wgpu::Sampler,
+    ) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("pp_bg"),
+            layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(scene_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(sampler),
+                },
+            ],
+        })
+    }
+
     fn resize(&mut self, w: u32, h: u32) {
         if w == 0 || h == 0 {
             return;
         }
         self.ctx.resize(winit::dpi::PhysicalSize::new(w, h));
         self.depth_view = Self::make_depth_view(&self.ctx.device, w, h);
+        let (tex, view) = Self::make_scene_texture(&self.ctx.device, &self.ctx.config, w, h);
+        self.scene_texture = tex;
+        self.scene_view = view;
+        self.pp_bind_group = Self::make_pp_bind_group(
+            &self.ctx.device,
+            &self.pp_bind_group_layout,
+            &self.scene_view,
+            &self.pp_sampler,
+        );
         self.camera.set_aspect(w, h);
         self.window_size = (w, h);
     }
@@ -1166,6 +1319,7 @@ impl Renderer {
             self.dataset.source_path = Some(pending.source_path.clone());
             if let Some(path) = self.dataset.source_path.clone() {
                 self.prefs.push_recent(path);
+                self.app_state.recent_files = self.prefs.recent_files.clone();
                 if let Err(err) = self.prefs.save() {
                     log::warn!("Failed to save prefs after dataset load: {err:#}");
                 }
@@ -1370,12 +1524,12 @@ impl Renderer {
                 label: Some("frame"),
             });
 
-        // ── 3-D pass (shapes + edges) ─────────────────────────────────────────
+        // ── 3-D pass (shapes + edges) → offscreen scene texture ──────────────
         {
             let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("3d_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &surface_view,
+                    view: &self.scene_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
@@ -1414,6 +1568,28 @@ impl Renderer {
             rpass.set_pipeline(&self.edge_pipeline);
             rpass.set_bind_group(0, &self.edge_bind_group, &[]);
             self.edge_renderer.draw(&mut rpass);
+        }
+
+        // ── FXAA post-process pass (scene texture → surface) ──────────────────
+        {
+            let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("fxaa_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &surface_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            rpass.set_pipeline(&self.pp_pipeline);
+            rpass.set_bind_group(0, &self.pp_bind_group, &[]);
+            rpass.draw(0..3, 0..1); // fullscreen triangle
         }
 
         // ── egui pass ─────────────────────────────────────────────────────────
@@ -1839,6 +2015,7 @@ impl ApplicationHandler for App {
 }
 
 fn main() {
+    human_panic::setup_panic!();
     env_logger::init();
 
     let args: Vec<String> = std::env::args().collect();

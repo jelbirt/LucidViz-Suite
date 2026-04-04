@@ -386,6 +386,8 @@ pub struct AppState {
 
     // ── File loader status ───────────────────────────────────────────────────
     pub load_error: Option<String>,
+    /// Recent files (synced from UserPreferences for GUI display).
+    pub recent_files: Vec<PathBuf>,
 
     // ── Pipeline progress receivers ─────────────────────────────────────────
     pub as_job: Option<PipelineJob>,
@@ -425,6 +427,7 @@ impl AppState {
             overrides: HashMap::new(),
             rebuild_lis: false,
             load_error: None,
+            recent_files: Vec::new(),
             as_job: None,
             mf_job: None,
         }
