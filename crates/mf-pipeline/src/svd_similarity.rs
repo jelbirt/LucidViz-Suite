@@ -7,12 +7,10 @@
 //! Reference: Levy, O. & Goldberg, Y. (2014). "Neural Word Embedding as
 //! Implicit Matrix Factorization." NeurIPS 27.
 
-use nalgebra::{DMatrix, SVD};
-
 /// Compute a denoised similarity matrix from PPMI via truncated SVD.
 ///
 /// 1. Build the n x n PPMI matrix.
-/// 2. Compute full SVD: PPMI = U * Sigma * V^T.
+/// 2. Compute thin SVD: PPMI = U * Sigma * V^T.
 /// 3. Truncate to rank `k` (the top-k singular values/vectors).
 /// 4. Form row embeddings: E = U_k * sqrt(Sigma_k).
 /// 5. Compute cosine similarity on E: sim(i,j) = dot(E_i, E_j) / (||E_i|| * ||E_j||).
@@ -24,26 +22,11 @@ pub fn ppmi_svd_similarity(ppmi: &[f64], n: usize, rank: usize) -> Vec<f64> {
     }
 
     let k = rank.min(n);
-
-    // Build nalgebra DMatrix from flat row-major PPMI.
-    let mat = DMatrix::from_fn(n, n, |i, j| ppmi[i * n + j]);
-
-    // Full SVD.
-    let svd = SVD::new(mat, true, true);
-    let u = match svd.u {
-        Some(ref u) => u,
+    let embeddings = match compute_svd_embeddings(ppmi, n, k) {
+        Some(e) => e,
         None => return ppmi_fallback(ppmi, n),
     };
-    let sigma = &svd.singular_values;
-
-    // Build embeddings: E[i, d] = U[i, d] * sqrt(sigma[d]) for d < k.
-    let actual_k = k.min(sigma.len());
-    let mut embeddings = vec![0.0f64; n * actual_k];
-    for i in 0..n {
-        for d in 0..actual_k {
-            embeddings[i * actual_k + d] = u[(i, d)] * sigma[d].max(0.0).sqrt();
-        }
-    }
+    let actual_k = embeddings.len() / n;
 
     // Precompute row norms.
     let norms: Vec<f64> = (0..n)
@@ -86,6 +69,41 @@ pub fn auto_svd_rank(n: usize) -> usize {
     }
     let candidate = (n / 5).max(10);
     candidate.min(100).min(n - 1)
+}
+
+/// Compute SVD embeddings: E[i, d] = U[i, d] * sqrt(sigma[d]) for d < k.
+/// Returns None if SVD fails.
+#[cfg(feature = "faer-svd")]
+fn compute_svd_embeddings(ppmi: &[f64], n: usize, k: usize) -> Option<Vec<f64>> {
+    let mat = faer::Mat::from_fn(n, n, |i, j| ppmi[i * n + j]);
+    let svd = mat.thin_svd().ok()?;
+    let u = svd.U();
+    let sigma = svd.S().column_vector();
+    let actual_k = k.min(sigma.nrows());
+    let mut embeddings = vec![0.0f64; n * actual_k];
+    for i in 0..n {
+        for d in 0..actual_k {
+            embeddings[i * actual_k + d] = u[(i, d)] * sigma[d].max(0.0).sqrt();
+        }
+    }
+    Some(embeddings)
+}
+
+#[cfg(not(feature = "faer-svd"))]
+fn compute_svd_embeddings(ppmi: &[f64], n: usize, k: usize) -> Option<Vec<f64>> {
+    use nalgebra::{DMatrix, SVD};
+    let mat = DMatrix::from_fn(n, n, |i, j| ppmi[i * n + j]);
+    let svd = SVD::new(mat, true, true);
+    let u = svd.u.as_ref()?;
+    let sigma = &svd.singular_values;
+    let actual_k = k.min(sigma.len());
+    let mut embeddings = vec![0.0f64; n * actual_k];
+    for i in 0..n {
+        for d in 0..actual_k {
+            embeddings[i * actual_k + d] = u[(i, d)] * sigma[d].max(0.0).sqrt();
+        }
+    }
+    Some(embeddings)
 }
 
 /// Fallback: normalize raw PPMI to [0, 1] if SVD fails.

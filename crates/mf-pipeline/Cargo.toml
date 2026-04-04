@@ -8,13 +8,15 @@ license.workspace = true
 publish.workspace = true
 
 [features]
-default   = []
+default   = ["faer-svd"]
 native-io = ["lv-data/native-io"]   # file I/O (ingest, output, pipeline); disable for wasm32
 wasm      = ["dep:getrandom"]   # wasm32-unknown-unknown compatibility
+faer-svd  = ["dep:faer"]   # use faer thin SVD for faster PPMI similarity
 
 [dependencies]
 lv-data = { path = "../lv-data", default-features = false }
 
+faer                            = { workspace = true, optional = true }
 nalgebra.workspace              = true
 unicode-normalization.workspace = true
 unicode-segmentation.workspace  = true

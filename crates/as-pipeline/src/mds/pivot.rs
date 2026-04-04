@@ -121,22 +121,41 @@ fn double_center_c(dist: &SeMatrix, pivots: &[usize], k: usize, n: usize) -> Vec
 }
 
 /// Thin SVD of a k×n matrix stored row-major.  Returns n×dims coordinates.
+///
+/// When the `faer-svd` feature is enabled, uses faer's thin SVD which only
+/// computes min(k,n) singular triplets. Falls back to nalgebra on WASM.
+#[cfg(feature = "faer-svd")]
 fn svd_coordinates(c_tilde: &[f64], k: usize, n: usize, dims: usize) -> Result<Vec<f64>> {
-    // Build nalgebra DMatrix (k rows, n cols).
+    let mat = faer::Mat::from_fn(k, n, |r, c| c_tilde[r * n + c]);
+    let svd = mat
+        .thin_svd()
+        .map_err(|e| AsError::MdsFailed(format!("pivot thin SVD failed: {e:?}")))?;
+    let s = svd.S().column_vector();
+    let v = svd.V();
+
+    let rank = s.nrows();
+    let effective_dims = dims.min(rank);
+    let mut x = vec![0.0f64; n * dims];
+    for d in 0..effective_dims {
+        let sigma = s[d];
+        for i in 0..n {
+            x[i * dims + d] = v[(i, d)] * sigma;
+        }
+    }
+    center_columns(&mut x, n, dims);
+    Ok(x)
+}
+
+#[cfg(not(feature = "faer-svd"))]
+fn svd_coordinates(c_tilde: &[f64], k: usize, n: usize, dims: usize) -> Result<Vec<f64>> {
     use nalgebra::DMatrix;
     let mat = DMatrix::from_row_slice(k, n, c_tilde);
-    // Thin SVD: mat = U * Sigma * V^T.  nalgebra SVD computes full, but we
-    // can just take the first `dims` components.
-    let svd = mat.svd(false, true); // compute_u=false, compute_v=true
-                                    // V is n×min(k,n); singular values in descending order.
+    let svd = mat.svd(false, true);
     let v_t = svd
         .v_t
-        .ok_or_else(|| AsError::MdsFailed("pivot SVD: V_t matrix unavailable".into()))?; // min(k,n) × n
-
-    let sigma = &svd.singular_values; // length = min(k,n)
+        .ok_or_else(|| AsError::MdsFailed("pivot SVD: V_t unavailable".into()))?;
+    let sigma = &svd.singular_values;
     let effective_dims = dims.min(sigma.len());
-
-    // X = V_D * Sigma_D  (i.e., for each row i of V^T column d: x[i,d] = v_t[d,i]*sigma[d])
     let mut x = vec![0.0f64; n * dims];
     for d in 0..effective_dims {
         let s = sigma[d];
@@ -144,15 +163,17 @@ fn svd_coordinates(c_tilde: &[f64], k: usize, n: usize, dims: usize) -> Result<V
             x[i * dims + d] = v_t[(d, i)] * s;
         }
     }
+    center_columns(&mut x, n, dims);
+    Ok(x)
+}
 
-    // Center.
+fn center_columns(x: &mut [f64], n: usize, dims: usize) {
     for d in 0..dims {
         let mean: f64 = (0..n).map(|i| x[i * dims + d]).sum::<f64>() / n as f64;
         for i in 0..n {
             x[i * dims + d] -= mean;
         }
     }
-    Ok(x)
 }
 
 // ---------------------------------------------------------------------------

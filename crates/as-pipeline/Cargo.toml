@@ -8,13 +8,15 @@ license.workspace = true
 publish.workspace = true
 
 [features]
-default   = []
+default   = ["faer-svd"]
 native-io = ["lv-data/native-io"]   # file I/O (XLSX/JSON output); disable for wasm32
 wasm      = ["dep:getrandom"]   # wasm32-unknown-unknown compatibility
+faer-svd  = ["dep:faer"]   # use faer thin SVD for faster pivot MDS
 
 [dependencies]
 lv-data = { path = "../lv-data", default-features = false }
 
+faer                      = { workspace = true, optional = true }
 nalgebra.workspace        = true
 ndarray.workspace         = true
 rayon.workspace           = true
