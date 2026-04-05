@@ -47,7 +47,7 @@ stop-words            = "0.10"
 # Rendering / GUI
 wgpu       = "27"
 winit      = "0.30"
-egui       = "0.33"
+egui       = "0.34"
 egui-wgpu  = "0.33"
 egui-winit = "0.33"
 
