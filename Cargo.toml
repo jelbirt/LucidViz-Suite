@@ -41,7 +41,7 @@ petgraph = "0.8"
 
 # Text / NLP
 unicode-normalization = "0.1"
-unicode-segmentation  = "1.0"
+unicode-segmentation  = "1.13"
 stop-words            = "0.10"
 
 # Rendering / GUI
