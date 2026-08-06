@@ -150,7 +150,7 @@ impl FileLoaderPanel {
                         }
                     }
                     let mut shapes: Vec<(String, u32)> = shape_counts.into_iter().collect();
-                    shapes.sort_by(|a, b| b.1.cmp(&a.1));
+                    shapes.sort_by_key(|s| std::cmp::Reverse(s.1));
                     let shape_str: Vec<String> =
                         shapes.iter().map(|(s, c)| format!("{s}: {c}")).collect();
                     ui.label(format!("Shapes: {}", shape_str.join(", ")));
