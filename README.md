@@ -1,5 +1,8 @@
 # Lucid Visualization Suite
 
+[![CI](https://github.com/jelbirt/LucidViz-Suite/actions/workflows/ci.yml/badge.svg)](https://github.com/jelbirt/LucidViz-Suite/actions/workflows/ci.yml)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
+
 GPU-accelerated social-scientific network visualization, built entirely in pure Rust.
 
 ## Overview
@@ -98,9 +101,10 @@ cargo bench -p lv-renderer
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `audio` | ✅ | Builds the `lv-audio` backend and GUI panel scaffolding; live MIDI runtime wiring in `lv-app` is still incomplete |
-| `midi` | ❌ | Adds live MIDI-device output (implies `audio`) |
-| `export` | ✅ | Builds the `lv-export` crate and demo tooling; the desktop GUI export panel is not fully wired into `lv-app` yet |
+| `audio` | ✅ | Builds the `lv-audio` backend and the fully wired Audio / MIDI panel (beat scheduling, sonification mapping); device output is a no-op without `midi` |
+| `midi` | ❌ | Adds live MIDI-device output (implies `audio`; requires ALSA dev packages on Linux) |
+| `export` | ✅ | Builds the `lv-export` crate and the fully wired export panel: PNG/TGA snapshots and frame sequences |
+| `video-export` | ❌ | Adds ffmpeg-based video export to the export panel (implies `export`) |
 | `native-io` | ✅ | XLSX/JSON file I/O |
 | `wasm` | ❌ | Reserved scaffold flag; `lv-app` is not currently shipped for `wasm32-unknown-unknown` |
 
@@ -127,8 +131,8 @@ cargo build --target wasm32-unknown-unknown \
 
 ## Current runtime status
 
-- **Export panel** is fully wired: PNG snapshots, frame sequences, and ffmpeg video export.
-- **Audio / MIDI panel** is fully wired: live MIDI output with graduated beats, sonification mapping presets, and configurable beat scheduling.
+- **Export panel** is fully wired: PNG snapshots and frame sequences by default, plus ffmpeg video export with the `video-export` flag.
+- **Audio / MIDI panel** is fully wired: graduated beats, sonification mapping presets, and configurable beat scheduling, with live MIDI-device output under the `midi` flag.
 - **Session management** is fully wired: save, load, rename, and delete sessions from `~/.lucid-viz/sessions/`.
 - **Headless mode**: `--headless --input <path> --output <path>` runs the AS pipeline without a window.
 
