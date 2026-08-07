@@ -73,6 +73,14 @@ jobs:
       - name: Clippy (zero warnings)
         run: cargo clippy --workspace -- -D warnings
 
+      # Feature-gated code (midi, video-export, wasm) is invisible to the default
+      # clippy run above; two lint regressions have reached main that way. Linux
+      # only, matching the --all-features check above — this job installs
+      # libasound2-dev, which the midi feature needs.
+      - name: Clippy with all features (Linux, zero warnings)
+        if: runner.os == 'Linux'
+        run: cargo clippy --workspace --all-features -- -D warnings
+
       - name: Build with MIDI enabled (Linux only — requires libasound2-dev)
         if: runner.os == 'Linux'
         run: cargo build --workspace -F lv-app/midi
