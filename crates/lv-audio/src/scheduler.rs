@@ -64,7 +64,7 @@ impl BeatsScheduler {
 
     pub fn disconnect(&mut self) {
         self.stop();
-        let old_engine = std::mem::replace(&mut self.engine, MidiEngine::new());
+        let old_engine = std::mem::take(&mut self.engine);
         old_engine.disconnect();
     }
 
