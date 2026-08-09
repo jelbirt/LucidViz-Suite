@@ -116,7 +116,9 @@ fn make_migration_dataset() -> LvDataset {
 fn sha256_hex(data: &[u8]) -> String {
     let mut h = Sha256::new();
     h.update(data);
-    format!("{:x}", h.finalize())
+    // digest 0.11 returns hybrid_array::Array, which has no LowerHex impl,
+    // so hex-encode by hand. Byte-for-byte identical to the old "{:x}".
+    h.finalize().iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// Load the golden-hashes store.
