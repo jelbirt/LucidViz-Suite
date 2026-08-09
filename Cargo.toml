@@ -55,7 +55,7 @@ egui-winit = "0.33"
 midir = "0.10"
 
 # Caching
-lru       = "0.12"
+lru       = "0.18"   # >=0.16.3 clears RUSTSEC-2026-0002 (IterMut unsoundness)
 
 # Crash reporting
 human-panic = "2"
