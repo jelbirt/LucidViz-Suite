@@ -40,6 +40,16 @@ updates:
           - "version-update:semver-minor"
           - "version-update:semver-major"
 
+      # getrandom is declared only so its wasm_js feature unifies onto the copy
+      # rand_core pulls in (rand 0.9 -> rand_core 0.9 -> getrandom 0.3). Bumping
+      # it alone puts the feature on a different version and strips the backend
+      # from the one rand actually uses, breaking every wasm32 build -- see the
+      # closed PR #12. Drop this once rand_core moves to getrandom 0.4.
+      - dependency-name: "getrandom"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-major"
+
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
