@@ -6,8 +6,46 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
 
+    # Crates that must move in lockstep. Bumped individually they produce PRs
+    # that cannot pass CI: egui-wgpu 0.33 requires wgpu ^27 and egui ^0.33,
+    # egui-winit 0.33 requires winit ^0.30, and wasm-bindgen pins the web-sys
+    # and js-sys it is compatible with. PR #15 (egui 0.33 -> 0.34 alone, while
+    # egui-wgpu and egui-winit stayed at 0.33) was the un-mergeable result.
+    groups:
+      graphics:
+        patterns:
+          - "egui"
+          - "egui-*"
+          - "epaint"
+          - "wgpu"
+          - "winit"
+      wasm-bindgen:
+        patterns:
+          - "wasm-bindgen"
+          - "wasm-bindgen-*"
+          - "web-sys"
+          - "js-sys"
+      linalg:
+        patterns:
+          - "faer"
+          - "nalgebra"
+
+    # ndarray is deliberately held at 0.16 -- see the comment on it in the root
+    # Cargo.toml. 0.17 has breaking API changes against the nalgebra compat
+    # layer, so an automated bump is guaranteed to be un-mergeable. Remove this
+    # once that pin is revisited.
+    ignore:
+      - dependency-name: "ndarray"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-major"
+
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns:
+          - "*"
