@@ -127,7 +127,7 @@ impl NotificationQueue {
                 .resizable(false)
                 .collapsible(false)
                 .frame(
-                    egui::Frame::window(&ctx.style())
+                    egui::Frame::window(&ctx.global_style())
                         .fill(bg)
                         .inner_margin(egui::Margin::same(8)),
                 )

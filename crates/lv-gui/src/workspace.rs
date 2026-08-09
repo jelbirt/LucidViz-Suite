@@ -1,4 +1,4 @@
-use egui::{CentralPanel, Context, TopBottomPanel};
+use egui::{CentralPanel, Panel, Ui};
 
 use crate::as_panel::AsPanel;
 use crate::mf_panel::MfPanel;
@@ -58,11 +58,13 @@ impl LucidWorkspace {
     ///
     /// Returns `true` if the renderer should rebuild the `LisBuffer` (i.e. the
     /// dataset or LIS config changed).
-    pub fn show(&mut self, ctx: &Context, state: &mut AppState) -> bool {
+    pub fn show(&mut self, ui: &mut Ui, state: &mut AppState) -> bool {
         let mut needs_rebuild = false;
+        // Windows are still Context-level; panels now nest inside a Ui.
+        let ctx = ui.ctx().clone();
 
         // ── Top bar: tab selector + utility buttons ──────────────────────────
-        TopBottomPanel::top("tab_bar").show(ctx, |ui| {
+        Panel::top("tab_bar").show_inside(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut self.active_tab, ActiveTab::LV, "LV");
                 ui.selectable_value(&mut self.active_tab, ActiveTab::AlignSpace, "AlignSpace");
@@ -85,7 +87,7 @@ impl LucidWorkspace {
                 .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
                 .open(&mut self.show_about)
-                .show(ctx, |ui| {
+                .show(&ctx, |ui| {
                     ui.heading("Lucid Visualization Suite");
                     ui.label(format!("Version {}", env!("CARGO_PKG_VERSION")));
                     ui.separator();
@@ -103,7 +105,7 @@ impl LucidWorkspace {
                 .collapsible(true)
                 .resizable(false)
                 .open(&mut self.show_shortcuts)
-                .show(ctx, |ui| {
+                .show(&ctx, |ui| {
                     egui::Grid::new("shortcut_grid")
                         .striped(true)
                         .show(ui, |ui| {
@@ -132,7 +134,7 @@ impl LucidWorkspace {
         }
 
         // ── Main panel: tab contents ────────────────────────────────────────
-        CentralPanel::default().show(ctx, |ui| match self.active_tab {
+        CentralPanel::default().show_inside(ui, |ui| match self.active_tab {
             ActiveTab::LV => {
                 needs_rebuild |= self.show_lv_tab(ui, state);
             }

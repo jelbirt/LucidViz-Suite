@@ -61,9 +61,12 @@ impl WgpuContext {
     pub fn new(window: &Window) -> Result<Self> {
         let size = window.inner_size();
 
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+        // wgpu 29 dropped Default for InstanceDescriptor: it now carries an
+        // optional display handle that has no sensible default. We don't pass
+        // one, which matches the pre-29 behaviour.
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
-            ..Default::default()
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
 
         // SAFETY: the interactive app keeps the window alive until after the
@@ -123,9 +126,12 @@ impl WgpuContext {
     /// context.  `capture_frame` / `capture_sequence` only use `device` and
     /// `queue` and work correctly here.
     pub fn new_headless() -> Result<Self> {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+        // wgpu 29 dropped Default for InstanceDescriptor: it now carries an
+        // optional display handle that has no sensible default. We don't pass
+        // one, which matches the pre-29 behaviour.
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
-            ..Default::default()
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
 
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {

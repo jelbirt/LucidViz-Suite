@@ -433,8 +433,8 @@ impl Renderer {
             .device
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("shape_pl"),
-                bind_group_layouts: &[&bgl],
-                push_constant_ranges: &[],
+                bind_group_layouts: &[Some(&bgl)],
+                immediate_size: 0,
             });
         let pipeline = ctx
             .device
@@ -464,13 +464,13 @@ impl Renderer {
                 },
                 depth_stencil: Some(wgpu::DepthStencilState {
                     format: wgpu::TextureFormat::Depth32Float,
-                    depth_write_enabled: true,
-                    depth_compare: wgpu::CompareFunction::Less,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::Less),
                     stencil: wgpu::StencilState::default(),
                     bias: wgpu::DepthBiasState::default(),
                 }),
                 multisample: wgpu::MultisampleState::default(),
-                multiview: None,
+                multiview_mask: None,
                 cache: None,
             });
 
@@ -523,8 +523,8 @@ impl Renderer {
             .device
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("edge_pl"),
-                bind_group_layouts: &[&edge_bgl],
-                push_constant_ranges: &[],
+                bind_group_layouts: &[Some(&edge_bgl)],
+                immediate_size: 0,
             });
         let edge_pipeline = ctx
             .device
@@ -554,13 +554,13 @@ impl Renderer {
                 },
                 depth_stencil: Some(wgpu::DepthStencilState {
                     format: wgpu::TextureFormat::Depth32Float,
-                    depth_write_enabled: false,
-                    depth_compare: wgpu::CompareFunction::Less,
+                    depth_write_enabled: Some(false),
+                    depth_compare: Some(wgpu::CompareFunction::Less),
                     stencil: wgpu::StencilState::default(),
                     bias: wgpu::DepthBiasState::default(),
                 }),
                 multisample: wgpu::MultisampleState::default(),
-                multiview: None,
+                multiview_mask: None,
                 cache: None,
             });
 
@@ -602,8 +602,8 @@ impl Renderer {
             ctx.device
                 .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some("pp_layout"),
-                    bind_group_layouts: &[&pp_bind_group_layout],
-                    push_constant_ranges: &[],
+                    bind_group_layouts: &[Some(&pp_bind_group_layout)],
+                    immediate_size: 0,
                 });
         let pp_pipeline = ctx
             .device
@@ -632,7 +632,7 @@ impl Renderer {
                 },
                 depth_stencil: None,
                 multisample: wgpu::MultisampleState::default(),
-                multiview: None,
+                multiview_mask: None,
                 cache: None,
             });
         let pp_sampler = ctx.device.create_sampler(&wgpu::SamplerDescriptor {
@@ -1509,8 +1509,14 @@ impl Renderer {
                 err
             })
             .ok()
-            .and_then(|surface| surface.get_current_texture().ok())
-        {
+            // wgpu 29 replaced the Result here with CurrentSurfaceTexture.
+            // Success and Suboptimal both carry a usable texture; every other
+            // variant means "skip this frame", which is what .ok() did before.
+            .and_then(|surface| match surface.get_current_texture() {
+                wgpu::CurrentSurfaceTexture::Success(tex)
+                | wgpu::CurrentSurfaceTexture::Suboptimal(tex) => Some(tex),
+                _ => None,
+            }) {
             Some(t) => t,
             None => return,
         };
@@ -1552,6 +1558,7 @@ impl Renderer {
                 }),
                 timestamp_writes: None,
                 occlusion_query_set: None,
+                multiview_mask: None,
             });
 
             // Draw shapes
@@ -1586,6 +1593,7 @@ impl Renderer {
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
+                multiview_mask: None,
             });
             rpass.set_pipeline(&self.pp_pipeline);
             rpass.set_bind_group(0, &self.pp_bind_group, &[]);
@@ -1594,9 +1602,9 @@ impl Renderer {
 
         // ── egui pass ─────────────────────────────────────────────────────────
         let raw_input = self.egui_winit.take_egui_input(window);
-        let full_output = self.egui_ctx.run(raw_input, |ctx| {
-            let _rebuild = self.workspace.show(ctx, &mut self.app_state);
-            self.notifications.show(ctx);
+        let full_output = self.egui_ctx.run_ui(raw_input, |ui| {
+            let _rebuild = self.workspace.show(ui, &mut self.app_state);
+            self.notifications.show(ui.ctx());
         });
         self.egui_winit
             .handle_platform_output(window, full_output.platform_output);
@@ -1636,6 +1644,7 @@ impl Renderer {
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
+                multiview_mask: None,
             });
             self.egui_renderer
                 .render(&mut rpass.forget_lifetime(), &clipped, &screen);

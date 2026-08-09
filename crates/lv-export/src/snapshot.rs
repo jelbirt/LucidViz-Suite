@@ -441,6 +441,7 @@ impl SnapshotRenderer {
                 }),
                 timestamp_writes: None,
                 occlusion_query_set: None,
+                multiview_mask: None,
             });
 
             rpass.set_pipeline(&self.shape_pipeline);
