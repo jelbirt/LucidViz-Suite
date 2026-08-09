@@ -73,6 +73,19 @@ jobs:
       - name: Clippy (zero warnings)
         run: cargo clippy --workspace -- -D warnings
 
+      # Code behind midi and video-export (7 cfg sites each) is invisible to the
+      # default clippy run above; two lint regressions have reached main that
+      # way. The wasm features gate no code, so they add nothing here. Linux
+      # only, matching the --all-features check above — this job installs
+      # libasound2-dev, which the midi feature needs.
+      #
+      # Neither clippy step passes --all-targets, so test, integration-test and
+      # bench code is still unlinted. That gap is real and currently red; it
+      # needs its own change to clear the pre-existing violations first.
+      - name: Clippy with all features (Linux, zero warnings)
+        if: runner.os == 'Linux'
+        run: cargo clippy --workspace --all-features -- -D warnings
+
       - name: Build with MIDI enabled (Linux only — requires libasound2-dev)
         if: runner.os == 'Linux'
         run: cargo build --workspace -F lv-app/midi
