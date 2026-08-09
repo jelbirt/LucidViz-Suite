@@ -366,8 +366,8 @@ struct Renderer {
 }
 
 impl Renderer {
-    fn new(window: &Window, prefs: UserPreferences) -> anyhow::Result<Self> {
-        let ctx = WgpuContext::new(window)?;
+    fn new(window: &Arc<Window>, prefs: UserPreferences) -> anyhow::Result<Self> {
+        let ctx = WgpuContext::new(window.clone())?;
 
         let dataset = make_demo_dataset();
         let lis_config = lis_config_from_prefs(&prefs);
