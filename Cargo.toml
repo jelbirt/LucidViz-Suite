@@ -55,7 +55,7 @@ egui-winit = "0.33"
 midir = "0.10"
 
 # Caching
-lru       = "0.12"
+lru       = "0.16"
 
 # Crash reporting
 human-panic = "2"
