@@ -91,8 +91,8 @@ pub fn create_shape_pipeline(
         .device
         .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("shape_pipeline_layout"),
-            bind_group_layouts: &[bgl],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(bgl)],
+            immediate_size: 0,
         });
 
     ctx.device
@@ -124,13 +124,13 @@ pub fn create_shape_pipeline(
             },
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: WgpuContext::DEPTH_FORMAT,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::Less,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::Less),
                 stencil: Default::default(),
                 bias: Default::default(),
             }),
             multisample: wgpu::MultisampleState::default(),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         })
 }
@@ -145,8 +145,8 @@ pub fn create_shape_pipeline_with_format(
 ) -> wgpu::RenderPipeline {
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("shape_pl_layout_fmt"),
-        bind_group_layouts: &[bgl],
-        push_constant_ranges: &[],
+        bind_group_layouts: &[Some(bgl)],
+        immediate_size: 0,
     });
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("shape_pipeline_fmt"),
@@ -175,13 +175,13 @@ pub fn create_shape_pipeline_with_format(
         },
         depth_stencil: Some(wgpu::DepthStencilState {
             format: depth_format,
-            depth_write_enabled: true,
-            depth_compare: wgpu::CompareFunction::Less,
+            depth_write_enabled: Some(true),
+            depth_compare: Some(wgpu::CompareFunction::Less),
             stencil: Default::default(),
             bias: Default::default(),
         }),
         multisample: wgpu::MultisampleState::default(),
-        multiview: None,
+        multiview_mask: None,
         cache: None,
     })
 }
@@ -204,8 +204,8 @@ pub fn create_axis_pipeline_with_format(
     ];
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("axis_pl_layout"),
-        bind_group_layouts: &[bgl],
-        push_constant_ranges: &[],
+        bind_group_layouts: &[Some(bgl)],
+        immediate_size: 0,
     });
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("axis_pipeline"),
@@ -240,13 +240,13 @@ pub fn create_axis_pipeline_with_format(
         depth_stencil: Some(wgpu::DepthStencilState {
             format: depth_format,
             // Write depth so axis lines occlude/are occluded correctly.
-            depth_write_enabled: false,
-            depth_compare: wgpu::CompareFunction::LessEqual,
+            depth_write_enabled: Some(false),
+            depth_compare: Some(wgpu::CompareFunction::LessEqual),
             stencil: Default::default(),
             bias: Default::default(),
         }),
         multisample: wgpu::MultisampleState::default(),
-        multiview: None,
+        multiview_mask: None,
         cache: None,
     })
 }
@@ -261,8 +261,8 @@ pub fn create_edge_pipeline(
         .device
         .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("edge_pipeline_layout"),
-            bind_group_layouts: &[bgl],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(bgl)],
+            immediate_size: 0,
         });
 
     // Per-edge-vertex layout (8 floats = 32 bytes):
@@ -312,13 +312,13 @@ pub fn create_edge_pipeline(
             },
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: WgpuContext::DEPTH_FORMAT,
-                depth_write_enabled: false,
-                depth_compare: wgpu::CompareFunction::Less,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::Less),
                 stencil: Default::default(),
                 bias: Default::default(),
             }),
             multisample: wgpu::MultisampleState::default(),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         })
 }

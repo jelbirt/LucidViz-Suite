@@ -1,6 +1,8 @@
 //! wgpu device/surface initialisation — `WgpuContext`.
 
 use anyhow::{Context, Result};
+use std::sync::Arc;
+
 use winit::dpi::PhysicalSize;
 use winit::window::Window;
 
@@ -58,18 +60,24 @@ impl WgpuContext {
     /// The window must outlive the `WgpuContext`. The caller must ensure that
     /// `window` is not dropped before this struct. The unsafety of
     /// `create_surface_unsafe` is encapsulated internally.
-    pub fn new(window: &Window) -> Result<Self> {
+    pub fn new(window: Arc<Window>) -> Result<Self> {
         let size = window.inner_size();
 
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+        // The display handle is required, not optional, for the GLES backend:
+        // wgpu-hal 27 probed for the Wayland/X11 display itself, but 29 removed
+        // that and selects the EGL platform from InstanceDescriptor::display.
+        // Passing None leaves it on the surfaceless platform, and a Wayland
+        // window is then rejected with "incompatible window kind". Pass the
+        // same window we hand to create_surface, as wgpu requires.
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
-            ..Default::default()
+            ..wgpu::InstanceDescriptor::new_with_display_handle(Box::new(window.clone()))
         });
 
         // SAFETY: the interactive app keeps the window alive until after the
         // renderer and context are dropped. `create_surface_for_window`
         // encapsulates that invariant in one place.
-        let surface = unsafe { create_surface_for_window(&instance, window)? };
+        let surface = unsafe { create_surface_for_window(&instance, &window)? };
 
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
@@ -123,9 +131,11 @@ impl WgpuContext {
     /// context.  `capture_frame` / `capture_sequence` only use `device` and
     /// `queue` and work correctly here.
     pub fn new_headless() -> Result<Self> {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+        // No window here, so no display handle: the surfaceless EGL platform is
+        // the correct choice for headless rendering.
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
-            ..Default::default()
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
 
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
