@@ -45,11 +45,11 @@ unicode-segmentation  = "1.0"
 stop-words            = "0.10"
 
 # Rendering / GUI
-wgpu       = "29"
+wgpu       = "30"
 winit      = "0.30"
-egui       = "0.34"
-egui-wgpu  = "0.34"
-egui-winit = "0.34"
+egui       = "0.36"
+egui-wgpu  = "0.36"
+egui-winit = "0.36"
 
 # Audio
 midir = "0.10"
